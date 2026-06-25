@@ -17,3 +17,9 @@ Thumbs.db
 # Windows alternate data stream files
 # 윈도우 Zone.Identifier 파일
 *:Zone.Identifier
+
+# Local-only firmware analysis files
+# 로컬 분석용 펌웨어 파일
+firmware/
+_extract/
+*.squashfs
