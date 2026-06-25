@@ -1,0 +1,19 @@
+# Firmware / flash dumps - do not publish
+*.bin
+*.rom
+*.dump
+*.img
+*.trx
+
+# Raw logs may contain MAC addresses or private data
+logs/*raw*
+logs/*original*
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+# Windows alternate data stream files
+# 윈도우 Zone.Identifier 파일
+*:Zone.Identifier
