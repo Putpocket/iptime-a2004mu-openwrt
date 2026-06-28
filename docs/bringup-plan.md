@@ -1,7 +1,7 @@
 # A2004MU OpenWrt Bring-up Plan
 
-This document defines a conservative bring-up plan for ipTIME A2004MU OpenWrt
-research. It is not a device-write procedure.
+This document defines a conservative bring-up plan for ipTIME A2004MU clean-room
+OpenWrt research. It is not a device-write procedure.
 
 ## Current Goals
 
@@ -14,12 +14,15 @@ research. It is not a device-write procedure.
 
 * Stock model field: `a2004m`
 * Stock rootfs offset: `0x2c0000`
-* SDK `AP-fw` starts with `cs6c`
-* SDK SquashFS offset: `0x19c000`
-* Candidate payload start: `0x40038`
-* Candidate rootfs offset: `0x1dc038`
-* Candidate rootfs calculation: `0x40038 + 0x19c000 = 0x1dc038`
-* Observed checksum candidates: `MATCH`
+* Stock boot log collected and analyzed as `booted`
+* Stock boot log shows SquashFS root mounted read-only
+* Stock boot log shows Ethernet devices and switch evidence
+* Side-path SDK image evidence: `AP-fw` starts with `cs6c`
+* Side-path SDK image evidence: SquashFS offset `0x19c000`
+* Side-path checksum candidate research: `MATCH`
+
+The SDK and wrapper observations are evidence only. They are not the primary
+OpenWrt porting path.
 
 ## Not Yet Verified
 

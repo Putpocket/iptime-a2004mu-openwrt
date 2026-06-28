@@ -1,82 +1,87 @@
 # ipTIME A2004MU OpenWrt Port Research
 
-This repository contains GitHub-safe notes and tooling for researching an
-OpenWrt port workflow for the ipTIME A2004MU, board alias `a2004m`, based on
-the Realtek RTL8197F platform.
+This repository contains GitHub-safe research notes and clean-room tooling for
+bringing ipTIME A2004MU support to a latest/official-style OpenWrt source tree.
 
-The goal is to document the hardware, inspect locally available firmware
-artifacts, and eventually prepare an experimental ipTIME web-update style image
-from locally built SDK outputs.
+It does not provide a flash-verified OpenWrt image.
 
-This repository does not provide a flash-verified image.
+## Main Goal
 
-## Safety Status
+* Add clean-room OpenWrt support for ipTIME A2004MU.
+* Fill missing RTL8197F/A2004MU support without copying proprietary SDK code.
+* First bring-up target: kernel boot, rootfs mount, wired LAN, and SSH.
 
-This work is experimental and not flash-verified.
+## Not The Main Goal
 
-Do not flash images produced from this research unless you have independently
-validated the image layout, checksums, boot behavior, and recovery path. This
-repository must not claim that a generated image is safe to flash.
+* Deploying an old SDK-generated OpenWrt `AP-fw.bin` as the final solution.
+* Relying on proprietary Realtek SDK source code.
+* Treating the experimental wrapper candidate as the final porting path.
+* Producing device-write instructions from this repository.
+
+The SDK wrapper and checksum work remains as image-format research only. It is
+an experimental side path, not the mainline OpenWrt deliverable.
+
+## Current Evidence
+
+Known device facts:
+
+* Device: ipTIME A2004MU
+* Board alias: `a2004m`
+* SoC: Realtek RTL8197F
+* DRAM: 64 MB DDR2
+* Flash: 8 MB SPI NOR
+* UART: 38400 8N1
+* Bootloader prompt: `<RealTek>`
+
+Collected evidence:
+
+* Stock firmware version 15.352 model field: `a2004m`
+* Stock rootfs offset: `0x2c0000`
+* Stock boot log collected and analyzed
+* Stock boot analyzer status: `booted`
+* Stock boot analyzer fatal hints: `0`
+* Stock rootfs mount seen: yes
+* Stock Ethernet evidence seen: yes
+* Stock panic seen: no
+* Stock boot log shows `rtkxxpart` partitions on `m25p80`
+* Stock boot log shows SquashFS root mounted read-only
+* Stock boot log shows switch API version `v1.2.12`
+* Stock boot log shows switch chip id `0x6367-0020`
+* Stock boot log shows `eth0`, `eth1`, and `peth0` mapped to `eth1`
+* SDK `AP-fw.bin` starts with `cs6c`
+* SDK `AP-fw.bin` SquashFS offset: `0x19c000`
+* SDK `AP-fw.bin` reports `linuxpart=0x40000` and `hwpart=0x20000`
+
+The SDK image evidence is used to understand flash layout, boot arguments, image
+structure, and rootfs placement. It is not a plan to ship SDK output.
+
+## Current Primary Next Step
+
+* Mainline OpenWrt porting gap analysis
+* DTS, target, and image recipe plan
+* Clean-room driver/support plan for the first wired LAN + SSH bring-up
+
+See:
+
+* `docs/mainline-porting-plan.md`
+* `docs/openwrt-gap-analysis.md`
+* `docs/clean-room-policy.md`
+* `docs/sdk-wrapper-side-path.md`
+
+## Repository Safety
 
 Do not commit any of the following:
 
 * Realtek SDK source files
 * ipTIME stock firmware
+* SDK output images
+* generated candidate firmware
 * extracted root filesystems
 * kernel modules or shared libraries
 * license-unclear vendor binaries
-* generated firmware images
 
 Only GitHub-safe material belongs here: documentation, scripts written from
-scratch, metadata, checksums, patch instructions, and build workflow notes.
-
-## Known Hardware
-
-* Device: ipTIME A2004MU
-* Board alias: `a2004m`
-* SoC: Realtek RTL8197F
-* DRAM: 64 MB DDR2 533 MHz
-* Flash: xmc25qh64, 8 MB SPI NOR
-* Flash erase size: 64 KB
-* Bootloader prompt: `<RealTek>`
-* UART: 38400 8N1
-
-Observed stock flash layout:
-
-| Region | Range |
-| --- | --- |
-| boot | `0x00000-0x1ffff` |
-| factory | `0x20000-0x2ffff` |
-| config/data | `0x30000-0x3ffff` |
-| firmware | `0x40000-0x7fffff` |
-
-The firmware region starts at `0x40000`. Do not overwrite below `0x40000`.
-
-## Current Status
-
-* Realtek OpenWrt SDK build succeeded locally.
-* SDK ramfs image was generated locally.
-* Bootloader RAM upload path is not currently available: `XMOD` and TFTP upload
-  were not usable in testing, although Ethernet initialization was observed.
-* SDK generated `AP-fw.bin` is a Realtek `cvimg`/raw image, not an ipTIME web
-  update format image.
-* Earlier notes indicated an SDK image using `linuxpart=0x60000`, which would
-  conflict with the A2004MU firmware region start at `0x40000`.
-* The current locally inspected `AP-fw.bin` reports `linuxpart=0x40000`; keep
-  verifying this on each generated image before serious wrapping work.
-* Next work is image layout and header tooling.
-
-## Local Paths
-
-Expected local research inputs are outside this repository:
-
-```text
-~/rtl8197f-research/openwrt_rtk/rtk_openwrt_sdk
-~/rtl8197f-research/openwrt_rtk/rtk_openwrt_sdk/bin/rtkmipsel
-~/rtl8197f-research/openwrt_rtk/rtk_openwrt_sdk/firmware
-```
-
-Do not copy stock firmware or SDK outputs into this repository.
+scratch, metadata, checksums, patch plans, and workflow notes.
 
 Local artifacts that are not safe for git are kept outside this repository:
 
@@ -84,68 +89,30 @@ Local artifacts that are not safe for git are kept outside this repository:
 ../iptime-a2004mu-local-artifacts/
 ```
 
-The repository is considered GitHub-safe only when this passes:
+Run these before committing or publishing:
 
 ```sh
 bash scripts/check_repo_safety.sh
+bash scripts/check_clean_room_boundaries.sh
 ```
 
 ## Tools
 
-Inspect a stock firmware file without modifying it:
+Evidence tools:
 
 ```sh
-python3 tools/inspect_stock_firmware.py /path/to/stock-firmware.bin
-```
-
-Inspect a Realtek SDK output image without modifying it:
-
-```sh
-python3 tools/inspect_sdk_image.py /path/to/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
-```
-
-Verify observed checksum candidates against a local stock firmware file without
-modifying it:
-
-```sh
-python3 tools/verify_iptime_checksum.py /path/to/local/stock-firmware.bin
-```
-
-For automation, emit JSON only:
-
-```sh
-python3 tools/verify_iptime_checksum.py --json /path/to/local/stock-firmware.bin
-```
-
-Plan an experimental wrapper layout without creating any output image:
-
-```sh
-python3 tools/plan_iptime_wrapper.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
-```
-
-Create experimental output only when explicitly forced. Output must be under
-`out/` and remains not flash-verified:
-
-```sh
-python3 tools/make_experimental_iptime_image.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin --output out/a2004m_experimental_candidate.bin --force-experimental
-```
-
-Triage a captured UART boot log without writing to a device:
-
-```sh
+python3 tools/inspect_stock_firmware.py /path/to/local/stock-firmware.bin
+python3 tools/inspect_sdk_image.py /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
 python3 tools/analyze_uart_boot_log.py /path/to/uart-boot.log
 ```
 
-Check the repository for accidentally committed unsafe files:
+Experimental side-path tools:
 
 ```sh
-bash scripts/check_repo_safety.sh
+python3 tools/verify_iptime_checksum.py /path/to/local/stock-firmware.bin
+python3 tools/plan_iptime_wrapper.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
+python3 tools/make_experimental_iptime_image.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin --output out/a2004m_experimental_candidate.bin --force-experimental
 ```
 
-See `docs/repo-safety.md` for local artifact handling and safety checks.
-
-See `docs/tooling.md` for the current tool roles and safety classification.
-
-The experimental image wrapper skeleton intentionally refuses to write output
-unless `--force-experimental` is passed. It is not complete image-generation
-tooling.
+The experimental side-path tools are not mainline OpenWrt deliverables, and
+their outputs are not flash-verified.

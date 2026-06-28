@@ -4,6 +4,10 @@ These notes collect current observations about ipTIME A2004MU stock images and
 Realtek SDK outputs. They are incomplete and must not be treated as a final
 format specification.
 
+Image-format and wrapper work is now an experimental side path. The primary
+project direction is a clean-room latest/official-style OpenWrt port for
+A2004MU, not deployment of SDK-generated `AP-fw` output.
+
 ## Stock ipTIME Image
 
 The observed stock flash layout places the firmware region at absolute offset
@@ -56,8 +60,8 @@ does not produce a flash-verified image.
 
 `tools/make_experimental_iptime_image.py` can write an experimental candidate
 only when explicitly forced. It recalculates the observed checksum candidates,
-but it is not a final image format specification and its output is not
-flash-verified.
+but it is not a final image format specification, not a mainline OpenWrt
+deliverable, and its output is not flash-verified.
 
 ## Realtek SDK AP-fw Image
 
@@ -109,5 +113,9 @@ deleted without a separate cleanup decision:
 The safe inspection scripts in `tools/` read local firmware artifacts without
 modifying them. The experimental wrapper skeleton is intentionally conservative
 and does not claim final correctness.
+
+The wrapper path is retained only as side-path evidence for layout and checksum
+research. Mainline port work should produce clean-room OpenWrt DTS, target,
+driver, image recipe, and board default changes instead.
 
 No image from this repository is flash-verified.

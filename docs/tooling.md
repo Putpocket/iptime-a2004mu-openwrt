@@ -1,65 +1,72 @@
 # Tooling
 
-This repository keeps tools separated by safety level. Safe tools may inspect
-local artifacts, but they must not copy vendor firmware, extracted rootfs
-contents, SDK binaries, `.so`, `.ko`, or generated images into git.
+This repository keeps tools separated by role. Safe tools may inspect local
+artifacts by user-provided path, but they must not copy vendor firmware,
+extracted rootfs contents, SDK binaries, `.so`, `.ko`, or generated images into
+git.
 
-## Tool Categories
+The primary deliverable is a clean-room mainline OpenWrt port. No actual
+OpenWrt source patches exist in this repository yet.
 
-| Category | Tools | Status |
-| --- | --- | --- |
-| safe commit | `tools/inspect_stock_firmware.py`, `tools/inspect_sdk_image.py`, `tools/verify_iptime_checksum.py`, `tools/plan_iptime_wrapper.py`, `tools/make_experimental_iptime_image.py`, `tools/analyze_uart_boot_log.py`, `scripts/check_repo_safety.sh` | Written from scratch, does not require repo-local vendor artifacts. |
-| safe after rewrite | none currently | Legacy checksum verifier was moved outside the repo; use `tools/verify_iptime_checksum.py` instead. |
-| legacy local only | `tools/analyze_header.py`, `tools/verify_iptime_header.py` | Fixed repo-local firmware paths; useful as local notes, not clean commit candidates. |
-| exclude from commit | `tools/pack_a2004m_openwrt.py` | Reads local vendor/rootfs inputs and writes a generated firmware candidate. |
+## Evidence Tools
 
-## Existing Legacy Tools
+These tools collect or summarize evidence for the mainline porting work. They
+are read-only with respect to their input files.
 
-Do not delete these without a separate cleanup decision:
+| Tool | Role |
+| --- | --- |
+| `tools/inspect_stock_firmware.py` | Reads a user-provided local stock firmware path and prints header/layout observations. |
+| `tools/inspect_sdk_image.py` | Reads a user-provided local SDK image path and prints image markers, strings, and SquashFS offsets. |
+| `tools/analyze_uart_boot_log.py` | Reads a user-provided UART log and reports heuristic boot signals in text or JSON. |
 
-| Tool | Role | Safety note |
-| --- | --- | --- |
-| `tools/analyze_header.py` | Prints stock header words, known value matches, and CRC32 candidates. | Reads `firmware/a2004m_ml_15_352.bin` directly, so it assumes an unsafe local artifact exists in the repo. |
-| `tools/verify_iptime_header.py` | Reproduces observed header checksum behavior for one local stock image. | Reads `firmware/a2004m_ml_15_352.bin` directly. Treat output as local research evidence only. |
-| `tools/verify_iptime_any.py` | Similar checksum verifier that can accept a firmware path argument. | Safe after rewrite: remove repo-local default path, add argparse, and label checksum output as observed. |
-| `tools/pack_a2004m_openwrt.py` | Combines local stock/header/kernel/rootfs inputs into a candidate image. | Writes `firmware/a2004m_openwrt_candidate_15_999.bin`; unsafe for the current GitHub-safe workflow. |
+Evidence from these tools should be used to design the clean-room OpenWrt DTS,
+target integration, image recipe, and network bring-up plan. The tools do not
+interact with devices.
 
-## Working Tree Classification
+## Experimental Side-path Tools
 
-| Path | Classification | Reason |
-| --- | --- | --- |
-| `README.md` | commit possible | GitHub-safe documentation. |
-| `.gitignore` | commit possible | Blocks local artifacts and generated files. |
-| `docs/hardware.md` | commit possible | GitHub-safe hardware notes. |
-| `docs/image-format-notes.md` | commit possible | Documents observations without embedding firmware. |
-| `docs/repo-safety.md` | commit possible | Documents safety policy and current local failure mode. |
-| `docs/tooling.md` | commit possible | Documents tool roles and safety levels. |
-| `scripts/check_repo_safety.sh` | commit possible | GitHub-safe repository scan script. |
-| `tools/inspect_stock_firmware.py` | commit possible | Reads local stock firmware by path and prints metadata only. |
-| `tools/inspect_sdk_image.py` | commit possible | Reads local SDK image by path and prints metadata only. |
-| `tools/verify_iptime_checksum.py` | commit possible | Reads a local stock firmware path and checks observed checksum candidates only; `--json` emits stable machine-readable output for automation. |
-| `tools/plan_iptime_wrapper.py` | commit possible | Dry-run planner for wrapper layout sanity checks; emits text or JSON and does not create image output. |
-| `tools/make_experimental_iptime_image.py` | commit possible | Experimental writer gated by `--force-experimental`; output must be under `out/`, is not flash-verified, and is checked by observed checksum candidates after creation. |
-| `tools/analyze_uart_boot_log.py` | commit possible | Read-only boot log triage tool; emits text or JSON and does not interact with devices. |
-| `tools/verify_iptime_any.py` | exclude from commit | Moved outside repo under local artifacts; replaced by `tools/verify_iptime_checksum.py`. |
-| `tools/verify_iptime_header.py` | legacy local only | Fixed repo-local firmware path. |
-| `tools/analyze_header.py` | legacy local only | Fixed repo-local firmware path. |
-| `tools/pack_a2004m_openwrt.py` | exclude from commit | Writes a generated firmware candidate under `firmware/`. |
-| `firmware/` | exclude from commit | Moved outside repo; contains stock firmware, generated candidates, SquashFS, and extracted rootfs content. |
-| `license-audit/` | exclude from commit for now | Moved outside repo; contains local audit outputs including a large file. |
-| `logs/` | judgment pending | May contain raw device data or private identifiers. |
+These tools are retained for image-format research. They are not mainline port
+deliverables and must not drive the project direction.
 
-## Local Artifact Location
+| Tool | Role |
+| --- | --- |
+| `tools/verify_iptime_checksum.py` | Checks observed checksum candidates against a local image. |
+| `tools/plan_iptime_wrapper.py` | Dry-run wrapper layout planner. It does not create output images. |
+| `tools/make_experimental_iptime_image.py` | Guarded experimental writer that requires `--force-experimental` and writes only under `out/`. |
 
-Unsafe local artifacts have been moved outside the repository:
+Outputs from the side-path tools are not flash-verified. This path is not a
+substitute for clean-room OpenWrt support.
 
-```text
-../iptime-a2004mu-local-artifacts/
-```
+## Repo Safety
 
-Before committing or publishing, rerun:
+| Tool | Role |
+| --- | --- |
+| `scripts/check_repo_safety.sh` | Checks for forbidden binary artifacts, extracted rootfs directories, and large files. |
+| `scripts/check_clean_room_boundaries.sh` | Checks for SDK/vendor/generated artifacts and clean-room boundary violations. |
+
+Run both before publishing or committing:
 
 ```sh
 bash scripts/check_repo_safety.sh
-git status --short --branch
+bash scripts/check_clean_room_boundaries.sh
+```
+
+## Legacy Local Tools
+
+Legacy local scripts were moved outside the repository under local artifacts.
+They are not commit candidates unless rewritten cleanly.
+
+| Tool | Status |
+| --- | --- |
+| `tools/analyze_header.py` | Legacy local only; fixed repo-local firmware path in older copy. |
+| `tools/verify_iptime_header.py` | Legacy local only; fixed repo-local firmware path in older copy. |
+| `tools/verify_iptime_any.py` | Replaced by `tools/verify_iptime_checksum.py`. |
+| `tools/pack_a2004m_openwrt.py` | Exclude from commit; old generated-candidate packing experiment. |
+
+## Local Artifact Location
+
+Unsafe local artifacts stay outside the repository:
+
+```text
+../iptime-a2004mu-local-artifacts/
 ```
