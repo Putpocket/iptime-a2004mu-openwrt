@@ -84,6 +84,15 @@ reboot
 watchdog
 ```
 
+## Analyzer Heuristics
+
+`tools/analyze_uart_boot_log.py` is a triage helper. Its status is heuristic,
+not a final boot verdict. Stock firmware logs may contain benign warning or
+error strings such as SquashFS xattr warnings, iptables rule warnings, or LED
+probe errors. Prioritize panic, rootfs mount failure, bootloader rejection, and
+reboot-loop evidence when deciding whether a boot log indicates a critical
+failure.
+
 ## Next Decisions
 
 * Bootloader rejection indicates an image wrapper/header problem.

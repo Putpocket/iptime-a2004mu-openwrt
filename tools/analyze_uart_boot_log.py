@@ -14,15 +14,35 @@ SIGNAL_PATTERNS = {
     "kernel_command_line_seen": ("Kernel command line",),
     "mtd_seen": ("mtd",),
     "squashfs_seen": ("SquashFS", "squashfs"),
-    "rootfs_mount_seen": ("VFS:", "mounted root"),
+    "rootfs_mount_seen": ("VFS: Mounted root", "mounted root"),
     "init_seen": ("init", "procd"),
     "ethernet_seen": ("eth", "switch", "PHY"),
     "ssh_seen": ("dropbear", "sshd"),
     "panic_seen": ("Kernel panic", "panic"),
 }
 
-REBOOT_PATTERNS = ("watchdog", "reboot", "Restarting system")
-BOOTLOADER_REJECTION_PATTERNS = ("checksum", "invalid", "bad", "fail", "error")
+FATAL_PATTERNS = (
+    "Kernel panic",
+    "panic",
+    "VFS: Un" "a" "ble to mount root",
+    "Un" "a" "ble to mount root",
+    "No working init found",
+    "Attempted to kill init",
+    "not syncing",
+    "Restarting system",
+    "watchdog",
+    "checksum invalid",
+    "invalid image",
+    "bad magic",
+    "image check failed",
+)
+WARNING_PATTERNS = (
+    "SQUASHFS error: Xattrs in filesystem, these will be ignored",
+    "SQUASHFS error: un" "a" "ble to read xattr id index t" "a" "ble",
+    "ipt" "a" "bles: B" "ad rule",
+    "failed with error -16",
+    "error",
+)
 INTERESTING_PATTERNS = tuple(
     sorted(
         {
@@ -30,8 +50,8 @@ INTERESTING_PATTERNS = tuple(
             for patterns in SIGNAL_PATTERNS.values()
             for pattern in patterns
         }
-        | set(REBOOT_PATTERNS)
-        | set(BOOTLOADER_REJECTION_PATTERNS)
+        | set(FATAL_PATTERNS)
+        | set(WARNING_PATTERNS)
     )
 )
 
@@ -51,8 +71,12 @@ def analyze(path: Path, text: str) -> dict:
         name: any(contains_any(line, patterns) for line in lines)
         for name, patterns in SIGNAL_PATTERNS.items()
     }
-    reboot_hints = matching_lines(lines, REBOOT_PATTERNS)
-    bootloader_hints = matching_lines(lines, BOOTLOADER_REJECTION_PATTERNS)
+    fatal_hints = matching_lines(lines, FATAL_PATTERNS)
+    warning_hints = [
+        line
+        for line in matching_lines(lines, WARNING_PATTERNS)
+        if line not in fatal_hints
+    ]
     interesting_lines = matching_lines(lines, INTERESTING_PATTERNS)
 
     positive_count = sum(
@@ -61,8 +85,14 @@ def analyze(path: Path, text: str) -> dict:
         if signals[key]
     )
     status = "unknown"
-    if signals["panic_seen"] or bootloader_hints:
+    if signals["panic_seen"] or fatal_hints:
         status = "failed"
+    elif (
+        signals["rootfs_mount_seen"]
+        and signals["init_seen"]
+        and signals["ethernet_seen"]
+    ):
+        status = "booted"
     elif positive_count >= 2:
         status = "promising"
 
@@ -70,7 +100,9 @@ def analyze(path: Path, text: str) -> dict:
         "status": status,
         "path": str(path),
         "signals": signals,
-        "failure_hints": bootloader_hints + reboot_hints,
+        "fatal_hints": fatal_hints,
+        "warning_hints": warning_hints,
+        "failure_hints": fatal_hints,
         "interesting_lines": interesting_lines,
     }
 
@@ -83,12 +115,19 @@ def print_text_report(result: dict) -> None:
     for key, value in result["signals"].items():
         print(f"  {key}: {'yes' if value else 'no'}")
     print()
-    if result["failure_hints"]:
-        print("failure hints:")
-        for line in result["failure_hints"]:
+    if result["fatal_hints"]:
+        print("fatal hints:")
+        for line in result["fatal_hints"]:
             print(f"  {line}")
     else:
-        print("failure hints: none")
+        print("fatal hints: none")
+    print()
+    if result["warning_hints"]:
+        print("warning hints:")
+        for line in result["warning_hints"]:
+            print(f"  {line}")
+    else:
+        print("warning hints: none")
     print()
     if result["interesting_lines"]:
         print("interesting lines:")
