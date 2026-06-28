@@ -80,6 +80,8 @@ Expected missing pieces:
 ## Work Breakdown
 
 1. Inventory latest OpenWrt tree for existing RTL8197F/Realtek support.
+   Completed for local tree `/home/user/openwrt`; no direct A2004MU/RTL8197F
+   support was found in `target/linux`.
 2. Decide target/subtarget strategy.
 3. Draft A2004MU DTS.
 4. Define flash partitions from stock evidence.
@@ -91,6 +93,8 @@ Expected missing pieces:
 10. Boot with UART logging.
 11. Debug rootfs, network, and SSH.
 12. Only later consider factory/sysupgrade and Wi-Fi.
+
+The next concrete step is target/subtarget decision and DTS skeleton design.
 
 ## Stop Conditions
 
