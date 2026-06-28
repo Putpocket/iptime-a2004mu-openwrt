@@ -111,6 +111,12 @@ modifying it:
 python3 tools/verify_iptime_checksum.py /path/to/local/stock-firmware.bin
 ```
 
+For automation, emit JSON only:
+
+```sh
+python3 tools/verify_iptime_checksum.py --json /path/to/local/stock-firmware.bin
+```
+
 Check the repository for accidentally committed unsafe files:
 
 ```sh

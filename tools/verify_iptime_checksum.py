@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +14,10 @@ FW_OFFSET = 0x40000
 HEADER_LEN = 0x38
 PROTECT2_MAGIC = 0x9A8F998B
 PROTECT2_SECRET_CANDIDATE = 0x128A8392
+WARNING = (
+    "experimental observed-candidate validation, not a final image format "
+    "specification"
+)
 
 
 @dataclass(frozen=True)
@@ -93,6 +98,140 @@ def print_field(label: str, value: int) -> None:
     print(f"{label}: 0x{value:08x} ({value})")
 
 
+def build_result(path: Path, data: bytes, digest: str, header: Header) -> tuple[dict, int]:
+    payload_start = FW_OFFSET + HEADER_LEN
+    payload_end = payload_start + header.check_length
+
+    result = {
+        "path": str(path),
+        "file_size": len(data),
+        "sha256": digest,
+        "fields": {
+            "model": ascii_field(header.model_raw),
+            "version": ascii_field(header.version_raw),
+            "protect2_magic": header.protect2_magic,
+            "protect2_checksum": header.protect2_checksum,
+            "rootfs_offset": header.rootfs_offset,
+            "check_length": header.check_length,
+            "primary_checksum": header.primary_checksum,
+            "kernel_string": ascii_field(header.kernel_raw),
+        },
+        "candidates": {
+            "payload_start": payload_start,
+            "payload_end": payload_end,
+            "primary_byte_sum": None,
+            "primary_checksum_candidate": None,
+            "protect2_checksum_candidate": None,
+            "protect2_magic_candidate": PROTECT2_MAGIC,
+        },
+        "matches": {
+            "primary_checksum": False,
+            "protect2_checksum": False,
+            "protect2_magic": PROTECT2_MAGIC == header.protect2_magic,
+            "all": False,
+        },
+        "status": "range_error",
+        "warning": WARNING,
+    }
+
+    if payload_end > len(data):
+        result["error"] = (
+            f"payload range 0x{payload_start:x}-0x{payload_end:x} "
+            f"exceeds file size 0x{len(data):x}"
+        )
+        return result, 1
+
+    payload = data[payload_start:payload_end]
+    byte_sum = sum(payload) & 0xFFFFFFFF
+    primary_candidate = protect_crc_candidate(
+        byte_sum, PROTECT2_SECRET_CANDIDATE, header.model_raw
+    )
+    protect2_candidate = protect_crc2_candidate(
+        primary_candidate, PROTECT2_SECRET_CANDIDATE, header.model_raw
+    )
+    primary_match = primary_candidate == header.primary_checksum
+    protect2_match = protect2_candidate == header.protect2_checksum
+    all_match = (
+        primary_match
+        and protect2_match
+        and result["matches"]["protect2_magic"]
+    )
+
+    result["candidates"].update(
+        {
+            "primary_byte_sum": byte_sum,
+            "primary_checksum_candidate": primary_candidate,
+            "protect2_checksum_candidate": protect2_candidate,
+        }
+    )
+    result["matches"].update(
+        {
+            "primary_checksum": primary_match,
+            "protect2_checksum": protect2_match,
+            "all": all_match,
+        }
+    )
+    result["status"] = "match" if all_match else "mismatch"
+    return result, 0
+
+
+def print_text_result(result: dict, header: Header) -> None:
+    print("WARNING: checksum logic below is experimental observed-candidate validation.")
+    print("It is not a final ipTIME image format specification.")
+    print()
+    print(f"path: {result['path']}")
+    print(f"file size: {result['file_size']} bytes (0x{result['file_size']:x})")
+    print(f"sha256: {result['sha256']}")
+    print()
+
+    print(f"model field at 0x40000: {result['fields']['model']!r} (raw {header.model_raw.hex()})")
+    print(
+        f"version field at 0x40008: "
+        f"{result['fields']['version']!r} (raw {header.version_raw.hex()})"
+    )
+    print_field("Protect2 magic field at 0x40010", result["fields"]["protect2_magic"])
+    print_field("Protect2 checksum field at 0x40014", result["fields"]["protect2_checksum"])
+    print_field("rootfs offset field at 0x4002c", result["fields"]["rootfs_offset"])
+    print_field("check length field at 0x40030", result["fields"]["check_length"])
+    print_field("primary checksum field at 0x40034", result["fields"]["primary_checksum"])
+    print(
+        f"kernel string at 0x40038: "
+        f"{result['fields']['kernel_string']!r} (raw {header.kernel_raw.hex()})"
+    )
+    print()
+
+    if result["status"] == "range_error":
+        print(f"experimental primary byte-sum candidate: skipped ({result['error']})")
+        return
+
+    candidates = result["candidates"]
+    matches = result["matches"]
+    print("experimental observed checksum candidates:")
+    print(f"  payload range: 0x{candidates['payload_start']:x}-0x{candidates['payload_end']:x}")
+    print(f"  primary byte-sum candidate: 0x{candidates['primary_byte_sum']:08x}")
+    print(
+        "  primary checksum candidate using model length and "
+        f"0x{PROTECT2_SECRET_CANDIDATE:08x}: "
+        f"0x{candidates['primary_checksum_candidate']:08x} "
+        f"{'MATCH' if matches['primary_checksum'] else 'MISMATCH'}"
+    )
+    print(
+        "  Protect2 checksum candidate using model length and "
+        f"0x{PROTECT2_SECRET_CANDIDATE:08x}: "
+        f"0x{candidates['protect2_checksum_candidate']:08x} "
+        f"{'MATCH' if matches['protect2_checksum'] else 'MISMATCH'}"
+    )
+    print(
+        f"  Protect2 magic candidate 0x{candidates['protect2_magic_candidate']:08x}: "
+        f"{'MATCH' if matches['protect2_magic'] else 'MISMATCH'}"
+    )
+
+    if matches["all"]:
+        print("result: observed candidates MATCH this image")
+    else:
+        print("result: one or more observed candidates MISMATCH this image")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -105,6 +244,11 @@ def main() -> int:
         type=Path,
         help="Path to a local stock firmware image; the file is read only",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable JSON only",
+    )
     args = parser.parse_args()
 
     path = args.firmware.expanduser()
@@ -113,81 +257,14 @@ def main() -> int:
 
     data = path.read_bytes()
     header = read_header(data)
+    result, exit_code = build_result(path, data, sha256_file(path), header)
 
-    print("WARNING: checksum logic below is experimental observed-candidate validation.")
-    print("It is not a final ipTIME image format specification.")
-    print()
-    print(f"path: {path}")
-    print(f"file size: {len(data)} bytes (0x{len(data):x})")
-    print(f"sha256: {sha256_file(path)}")
-    print()
-
-    print(f"model field at 0x40000: {ascii_field(header.model_raw)!r} (raw {header.model_raw.hex()})")
-    print(
-        f"version field at 0x40008: "
-        f"{ascii_field(header.version_raw)!r} (raw {header.version_raw.hex()})"
-    )
-    print_field("Protect2 magic field at 0x40010", header.protect2_magic)
-    print_field("Protect2 checksum field at 0x40014", header.protect2_checksum)
-    print_field("rootfs offset field at 0x4002c", header.rootfs_offset)
-    print_field("check length field at 0x40030", header.check_length)
-    print_field("primary checksum field at 0x40034", header.primary_checksum)
-    print(
-        f"kernel string at 0x40038: "
-        f"{ascii_field(header.kernel_raw)!r} (raw {header.kernel_raw.hex()})"
-    )
-    print()
-
-    payload_start = FW_OFFSET + HEADER_LEN
-    payload_end = payload_start + header.check_length
-    if payload_end > len(data):
-        print(
-            "experimental primary byte-sum candidate: skipped "
-            f"(range 0x{payload_start:x}-0x{payload_end:x} exceeds file size)"
-        )
-        return 1
-
-    payload = data[payload_start:payload_end]
-    byte_sum = sum(payload) & 0xFFFFFFFF
-    primary_candidate = protect_crc_candidate(
-        byte_sum, PROTECT2_SECRET_CANDIDATE, header.model_raw
-    )
-    protect2_candidate = protect_crc2_candidate(
-        primary_candidate, PROTECT2_SECRET_CANDIDATE, header.model_raw
-    )
-
-    print("experimental observed checksum candidates:")
-    print(f"  payload range: 0x{payload_start:x}-0x{payload_end:x}")
-    print(f"  primary byte-sum candidate: 0x{byte_sum:08x}")
-    print(
-        "  primary checksum candidate using model length and "
-        f"0x{PROTECT2_SECRET_CANDIDATE:08x}: "
-        f"0x{primary_candidate:08x} "
-        f"{status(primary_candidate, header.primary_checksum)}"
-    )
-    print(
-        "  Protect2 checksum candidate using model length and "
-        f"0x{PROTECT2_SECRET_CANDIDATE:08x}: "
-        f"0x{protect2_candidate:08x} "
-        f"{status(protect2_candidate, header.protect2_checksum)}"
-    )
-
-    magic_status = status(PROTECT2_MAGIC, header.protect2_magic)
-    print(
-        f"  Protect2 magic candidate 0x{PROTECT2_MAGIC:08x}: "
-        f"{magic_status}"
-    )
-
-    if (
-        primary_candidate == header.primary_checksum
-        and protect2_candidate == header.protect2_checksum
-        and PROTECT2_MAGIC == header.protect2_magic
-    ):
-        print("result: observed candidates MATCH this image")
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        print("result: one or more observed candidates MISMATCH this image")
+        print_text_result(result, header)
 
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

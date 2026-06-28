@@ -37,7 +37,7 @@ Do not delete these without a separate cleanup decision:
 | `scripts/check_repo_safety.sh` | commit possible | GitHub-safe repository scan script. |
 | `tools/inspect_stock_firmware.py` | commit possible | Reads local stock firmware by path and prints metadata only. |
 | `tools/inspect_sdk_image.py` | commit possible | Reads local SDK image by path and prints metadata only. |
-| `tools/verify_iptime_checksum.py` | commit possible | Reads a local stock firmware path and checks observed checksum candidates only. |
+| `tools/verify_iptime_checksum.py` | commit possible | Reads a local stock firmware path and checks observed checksum candidates only; `--json` emits stable machine-readable output for automation. |
 | `tools/make_experimental_iptime_image.py` | commit possible | Conservative placeholder; does not claim final correctness. |
 | `tools/verify_iptime_any.py` | exclude from commit | Moved outside repo under local artifacts; replaced by `tools/verify_iptime_checksum.py`. |
 | `tools/verify_iptime_header.py` | legacy local only | Fixed repo-local firmware path. |
