@@ -6,6 +6,7 @@
 * Branch: `a2004mu-rtl8197f-scaffold`
 * Purpose: first clean-room scaffold for RTL8197F platform investigation
 * Status: not build-validated, not hardware-validated
+* Defconfig metadata check passed; no firmware/image build performed.
 * No flashing or device-write instructions included
 * Patch export:
 
