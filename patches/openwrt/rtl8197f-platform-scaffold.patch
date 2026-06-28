@@ -1,0 +1,98 @@
+diff --git a/target/linux/realtek/Makefile b/target/linux/realtek/Makefile
+index b6823f6c73..c8b0608c3f 100644
+--- a/target/linux/realtek/Makefile
++++ b/target/linux/realtek/Makefile
+@@ -7,7 +7,7 @@ BOARD:=realtek
+ BOARDNAME:=Realtek MIPS
+ DEVICE_TYPE:=basic
+ FEATURES:=ramdisk squashfs
+-SUBTARGETS:=rtl838x rtl839x rtl930x rtl930x_nand rtl931x rtl931x_nand
++SUBTARGETS:=rtl838x rtl839x rtl930x rtl930x_nand rtl931x rtl931x_nand rtl8197f
+ 
+ KERNEL_PATCHVER:=6.18
+ 
+diff --git a/target/linux/realtek/rtl8197f/target.mk b/target/linux/realtek/rtl8197f/target.mk
+new file mode 100644
+index 0000000000..ae3046b31c
+--- /dev/null
++++ b/target/linux/realtek/rtl8197f/target.mk
+@@ -0,0 +1,13 @@
++# SPDX-License-Identifier: GPL-2.0-only
++ARCH:=mips
++SUBTARGET:=rtl8197f
++BOARD:=realtek
++BOARDNAME:=Realtek MIPS RTL8197F scaffold
++
++# This subtarget is a clean-room scaffold only. CPU_TYPE is intentionally not
++# set until the RTL8197F CPU/platform path is confirmed from public evidence.
++
++define Target/Description
++	Provisional scaffold for Realtek RTL8197F platform investigation.
++	Not build-validated and not validated on hardware.
++endef
+diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
+new file mode 100644
+index 0000000000..fb5b713494
+--- /dev/null
++++ b/target/linux/realtek/rtl8197f/config-6.18
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Clean-room RTL8197F scaffold only.
++#
++# TODO: Add only independently verified kernel config symbols after the
++# CPU/platform, timer, interrupt, UART, SPI NOR, Ethernet MAC, and switch/PHY
++# paths are confirmed. Do not copy SDK-derived config.
+diff --git a/target/linux/realtek/rtl8197f/README.md b/target/linux/realtek/rtl8197f/README.md
+new file mode 100644
+index 0000000000..e313199b1a
+--- /dev/null
++++ b/target/linux/realtek/rtl8197f/README.md
+@@ -0,0 +1,35 @@
++# RTL8197F Scaffold
++
++This is a clean-room scaffold for RTL8197F investigation.
++
++Status:
++
++* Not hardware validated.
++* Not a complete OpenWrt target.
++* No flash/install instructions.
++* No SDK vendor code.
++* No generated firmware output.
++
++Required unknowns:
++
++* CPU/platform compatibility.
++* Machine compatible.
++* Memory map.
++* UART base/IRQ/clock.
++* Interrupt controller.
++* Timer/clocksource.
++* SPI NOR controller.
++* Ethernet MAC.
++* Switch/PHY/MDIO.
++* GPIO/LED/button.
++* Image recipe.
++
++First milestone:
++
++* Kernel boot log over UART.
++* Then wired LAN + SSH.
++
++Deferred:
++
++* Wi-Fi.
++* LuCI.
+diff --git a/target/linux/realtek/image/rtl8197f.mk b/target/linux/realtek/image/rtl8197f.mk
+new file mode 100644
+index 0000000000..6a252fbe9b
+--- /dev/null
++++ b/target/linux/realtek/image/rtl8197f.mk
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Clean-room RTL8197F scaffold only.
++#
++# No devices are defined yet. Image recipes must wait until the platform entry,
++# DTS, flash layout, and image format requirements are independently verified.
