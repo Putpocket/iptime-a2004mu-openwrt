@@ -104,6 +104,13 @@ Inspect a Realtek SDK output image without modifying it:
 python3 tools/inspect_sdk_image.py /path/to/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
 ```
 
+Verify observed checksum candidates against a local stock firmware file without
+modifying it:
+
+```sh
+python3 tools/verify_iptime_checksum.py /path/to/local/stock-firmware.bin
+```
+
 Check the repository for accidentally committed unsafe files:
 
 ```sh

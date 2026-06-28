@@ -45,6 +45,10 @@ These observations are not a final public format specification. Treat checksum
 logic as `observed` only when a tool verifies it against a specific local stock
 image. Otherwise keep it `uncertain`.
 
+`tools/verify_iptime_checksum.py` checks these observed checksum candidates
+against a user-provided local stock firmware image. It is a validation helper,
+not final image-format documentation and not image-generation logic.
+
 ## Realtek SDK AP-fw Image
 
 Realtek SDK output path used during local research:

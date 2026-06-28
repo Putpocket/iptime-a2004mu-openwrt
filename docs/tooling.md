@@ -8,8 +8,8 @@ contents, SDK binaries, `.so`, `.ko`, or generated images into git.
 
 | Category | Tools | Status |
 | --- | --- | --- |
-| safe commit | `tools/inspect_stock_firmware.py`, `tools/inspect_sdk_image.py`, `tools/make_experimental_iptime_image.py`, `scripts/check_repo_safety.sh` | Written from scratch, does not require repo-local vendor artifacts. |
-| safe after rewrite | `tools/verify_iptime_any.py` | Accepts a path argument, but still has a repo-local firmware default and experimental checksum conclusions. |
+| safe commit | `tools/inspect_stock_firmware.py`, `tools/inspect_sdk_image.py`, `tools/verify_iptime_checksum.py`, `tools/make_experimental_iptime_image.py`, `scripts/check_repo_safety.sh` | Written from scratch, does not require repo-local vendor artifacts. |
+| safe after rewrite | none currently | Legacy checksum verifier was moved outside the repo; use `tools/verify_iptime_checksum.py` instead. |
 | legacy local only | `tools/analyze_header.py`, `tools/verify_iptime_header.py` | Fixed repo-local firmware paths; useful as local notes, not clean commit candidates. |
 | exclude from commit | `tools/pack_a2004m_openwrt.py` | Reads local vendor/rootfs inputs and writes a generated firmware candidate. |
 
@@ -37,8 +37,9 @@ Do not delete these without a separate cleanup decision:
 | `scripts/check_repo_safety.sh` | commit possible | GitHub-safe repository scan script. |
 | `tools/inspect_stock_firmware.py` | commit possible | Reads local stock firmware by path and prints metadata only. |
 | `tools/inspect_sdk_image.py` | commit possible | Reads local SDK image by path and prints metadata only. |
+| `tools/verify_iptime_checksum.py` | commit possible | Reads a local stock firmware path and checks observed checksum candidates only. |
 | `tools/make_experimental_iptime_image.py` | commit possible | Conservative placeholder; does not claim final correctness. |
-| `tools/verify_iptime_any.py` | safe after rewrite | Has a path argument but keeps a repo-local default. |
+| `tools/verify_iptime_any.py` | exclude from commit | Moved outside repo under local artifacts; replaced by `tools/verify_iptime_checksum.py`. |
 | `tools/verify_iptime_header.py` | legacy local only | Fixed repo-local firmware path. |
 | `tools/analyze_header.py` | legacy local only | Fixed repo-local firmware path. |
 | `tools/pack_a2004m_openwrt.py` | exclude from commit | Writes a generated firmware candidate under `firmware/`. |
