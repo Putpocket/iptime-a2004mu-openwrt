@@ -117,6 +117,12 @@ For automation, emit JSON only:
 python3 tools/verify_iptime_checksum.py --json /path/to/local/stock-firmware.bin
 ```
 
+Plan an experimental wrapper layout without creating any output image:
+
+```sh
+python3 tools/plan_iptime_wrapper.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
+```
+
 Check the repository for accidentally committed unsafe files:
 
 ```sh

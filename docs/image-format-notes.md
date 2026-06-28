@@ -49,6 +49,11 @@ image. Otherwise keep it `uncertain`.
 against a user-provided local stock firmware image. It is a validation helper,
 not final image-format documentation and not image-generation logic.
 
+`tools/plan_iptime_wrapper.py` is a dry-run layout sanity checker for work that
+may happen before wrapper generation. It reports proposed offsets, size limits,
+SDK image markers, and risk flags. It does not implement image generation and
+does not produce a flash-verified image.
+
 ## Realtek SDK AP-fw Image
 
 Realtek SDK output path used during local research:
