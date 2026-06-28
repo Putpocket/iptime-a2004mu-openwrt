@@ -169,6 +169,11 @@ Direct RTL8197F platform support is still not confirmed. The existing
 but it should not be treated as a confirmed base for A2004MU until platform,
 clock, interrupt, timer, UART, SPI, Ethernet, and switch support are verified.
 
+Upstream Linux inventory was also completed against `/home/user/linux` at
+`0716f9b9338a`. No direct RTL8197F, `rtkmipsel`, or A2004MU platform base was
+found. The next decision is platform-base placement before target/subtarget or
+DTS-first work. See [platform-decision-notes.md](platform-decision-notes.md).
+
 ## Likely Required New Files
 
 Exact target names are not confirmed. Candidate files may include:
@@ -199,26 +204,29 @@ OpenWrt target tree. Candidate patch areas:
 
 * Whether RTL8197F is close enough to the existing OpenWrt `realtek` target to
   justify a new subtarget there.
-* Whether upstream Linux already has usable RTL8197F platform support.
+* Whether existing upstream Linux Realtek RTL83xx/RTL93xx platform support can
+  be adapted cleanly to RTL8197F.
 * Exact UART, SPI, interrupt, clock, Ethernet MAC, switch, PHY, GPIO, LED, and
   button bindings for A2004MU.
 * Whether the observed switch chip id `0x6367-0020` maps to an existing Linux
   DSA/switch/PHY path.
-* Whether first bring-up should use a new realtek subtarget or a separate target
-  after kernel inventory.
+* Whether first bring-up should start with kernel platform patches, a new
+  realtek subtarget, or a separate target.
 
 ## Next Work Units
 
-1. Inspect upstream Linux and OpenWrt target patches for RTL8197F platform
-   support.
-2. Decide target/subtarget placement based on actual SoC support, not target
+1. Decide whether platform support work must precede OpenWrt target/subtarget
+   scaffolding.
+2. Compare RTL8197F with upstream Realtek RTL83xx/RTL93xx platform support.
+3. Decide target/subtarget placement based on actual SoC support, not target
    name similarity.
-3. Draft a minimal A2004MU DTS skeleton from observed hardware facts.
-4. Define the stock-derived flash partitions in DTS.
-5. Identify the minimal Ethernet MAC and switch/PHY path for wired LAN.
-6. Add image recipe skeleton for initramfs-first bring-up.
-7. Add board.d network defaults after the interface naming path is understood.
-8. Keep SDK wrapper tooling as side-path evidence only.
+4. Draft a minimal A2004MU DTS skeleton from observed hardware facts after the
+   platform base decision.
+5. Define the stock-derived flash partitions in DTS.
+6. Identify the minimal Ethernet MAC and switch/PHY path for wired LAN.
+7. Add image recipe skeleton for initramfs-first bring-up.
+8. Add board.d network defaults after the interface naming path is understood.
+9. Keep SDK wrapper tooling as side-path evidence only.
 
 ## Current Mainline Deliverables
 
