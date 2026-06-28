@@ -39,7 +39,7 @@ Do not delete these without a separate cleanup decision:
 | `tools/inspect_sdk_image.py` | commit possible | Reads local SDK image by path and prints metadata only. |
 | `tools/verify_iptime_checksum.py` | commit possible | Reads a local stock firmware path and checks observed checksum candidates only; `--json` emits stable machine-readable output for automation. |
 | `tools/plan_iptime_wrapper.py` | commit possible | Dry-run planner for wrapper layout sanity checks; emits text or JSON and does not create image output. |
-| `tools/make_experimental_iptime_image.py` | commit possible | Conservative placeholder; does not claim final correctness. |
+| `tools/make_experimental_iptime_image.py` | commit possible | Experimental writer gated by `--force-experimental`; output must be under `out/`, is not flash-verified, and is checked by observed checksum candidates after creation. |
 | `tools/verify_iptime_any.py` | exclude from commit | Moved outside repo under local artifacts; replaced by `tools/verify_iptime_checksum.py`. |
 | `tools/verify_iptime_header.py` | legacy local only | Fixed repo-local firmware path. |
 | `tools/analyze_header.py` | legacy local only | Fixed repo-local firmware path. |

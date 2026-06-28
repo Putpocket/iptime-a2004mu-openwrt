@@ -54,6 +54,11 @@ may happen before wrapper generation. It reports proposed offsets, size limits,
 SDK image markers, and risk flags. It does not implement image generation and
 does not produce a flash-verified image.
 
+`tools/make_experimental_iptime_image.py` can write an experimental candidate
+only when explicitly forced. It recalculates the observed checksum candidates,
+but it is not a final image format specification and its output is not
+flash-verified.
+
 ## Realtek SDK AP-fw Image
 
 Realtek SDK output path used during local research:

@@ -123,6 +123,13 @@ Plan an experimental wrapper layout without creating any output image:
 python3 tools/plan_iptime_wrapper.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
 ```
 
+Create experimental output only when explicitly forced. Output must be under
+`out/` and remains not flash-verified:
+
+```sh
+python3 tools/make_experimental_iptime_image.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin --output out/a2004m_experimental_candidate.bin --force-experimental
+```
+
 Check the repository for accidentally committed unsafe files:
 
 ```sh
