@@ -133,6 +133,10 @@ These drivers may be useful references. They do not prove support for the
 A2004MU Ethernet MAC, the observed stock switch chip id `0x6367-0020`, or the
 RTL8197F platform.
 
+Existing upstream Realtek RTL83xx/RTL93xx/Otto code must be treated as
+reference-only for this project. It is not a source for SDK-derived code, and it
+is not proof that RTL8197F can reuse those drivers unchanged.
+
 A bring-up-ready RTL8197F platform base was not found in the inspected upstream
 Linux tree.
 
@@ -164,9 +168,12 @@ whether kernel support patches must come first.
 
 ## Next Work
 
-1. Compare RTL8197F with existing upstream Realtek RTL83xx/RTL93xx platform
+1. Use
+   [`rtl8197f-platform-support-plan.md`](rtl8197f-platform-support-plan.md) as
+   the next design document before implementation.
+2. Compare RTL8197F with existing upstream Realtek RTL83xx/RTL93xx platform
    support at the register and boot-architecture level.
-2. Decide whether the first code step is kernel platform support or OpenWrt
+3. Decide whether the first code step is kernel platform support or OpenWrt
    target/subtarget scaffolding.
-3. Decide target/subtarget placement.
-4. Only then draft DTS skeleton and image recipe.
+4. Decide target/subtarget placement.
+5. Only then draft DTS skeleton and image recipe.

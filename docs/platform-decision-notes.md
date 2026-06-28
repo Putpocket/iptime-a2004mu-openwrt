@@ -79,11 +79,17 @@ Cons:
 ## Provisional Recommendation
 
 Treat kernel platform support as the next decision point before DTS-first work.
+The supporting design document is
+[`rtl8197f-platform-support-plan.md`](rtl8197f-platform-support-plan.md).
 
 The current evidence does not justify assuming that existing OpenWrt
 `target/linux/realtek` support is directly usable for RTL8197F. It should remain
 a structural reference until CPU/platform, clock, interrupt, timer, UART, SPI,
 Ethernet, and switch compatibility are confirmed.
+
+The first implementation step should be platform support investigation and
+design. DTS, target/subtarget placement, and image recipe work should follow
+only after the CPU/platform, timer, interrupt, and early UART paths are plausible.
 
 ## Why DTS-First Is Risky
 
