@@ -130,6 +130,12 @@ Create experimental output only when explicitly forced. Output must be under
 python3 tools/make_experimental_iptime_image.py --stock /path/to/local/stock-firmware.bin --sdk-image /path/to/local/openwrt-rtkmipsel-rtl8197f-AP-fw.bin --output out/a2004m_experimental_candidate.bin --force-experimental
 ```
 
+Triage a captured UART boot log without writing to a device:
+
+```sh
+python3 tools/analyze_uart_boot_log.py /path/to/uart-boot.log
+```
+
 Check the repository for accidentally committed unsafe files:
 
 ```sh

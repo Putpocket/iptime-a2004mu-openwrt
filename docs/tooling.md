@@ -8,7 +8,7 @@ contents, SDK binaries, `.so`, `.ko`, or generated images into git.
 
 | Category | Tools | Status |
 | --- | --- | --- |
-| safe commit | `tools/inspect_stock_firmware.py`, `tools/inspect_sdk_image.py`, `tools/verify_iptime_checksum.py`, `tools/plan_iptime_wrapper.py`, `tools/make_experimental_iptime_image.py`, `scripts/check_repo_safety.sh` | Written from scratch, does not require repo-local vendor artifacts. |
+| safe commit | `tools/inspect_stock_firmware.py`, `tools/inspect_sdk_image.py`, `tools/verify_iptime_checksum.py`, `tools/plan_iptime_wrapper.py`, `tools/make_experimental_iptime_image.py`, `tools/analyze_uart_boot_log.py`, `scripts/check_repo_safety.sh` | Written from scratch, does not require repo-local vendor artifacts. |
 | safe after rewrite | none currently | Legacy checksum verifier was moved outside the repo; use `tools/verify_iptime_checksum.py` instead. |
 | legacy local only | `tools/analyze_header.py`, `tools/verify_iptime_header.py` | Fixed repo-local firmware paths; useful as local notes, not clean commit candidates. |
 | exclude from commit | `tools/pack_a2004m_openwrt.py` | Reads local vendor/rootfs inputs and writes a generated firmware candidate. |
@@ -40,6 +40,7 @@ Do not delete these without a separate cleanup decision:
 | `tools/verify_iptime_checksum.py` | commit possible | Reads a local stock firmware path and checks observed checksum candidates only; `--json` emits stable machine-readable output for automation. |
 | `tools/plan_iptime_wrapper.py` | commit possible | Dry-run planner for wrapper layout sanity checks; emits text or JSON and does not create image output. |
 | `tools/make_experimental_iptime_image.py` | commit possible | Experimental writer gated by `--force-experimental`; output must be under `out/`, is not flash-verified, and is checked by observed checksum candidates after creation. |
+| `tools/analyze_uart_boot_log.py` | commit possible | Read-only boot log triage tool; emits text or JSON and does not interact with devices. |
 | `tools/verify_iptime_any.py` | exclude from commit | Moved outside repo under local artifacts; replaced by `tools/verify_iptime_checksum.py`. |
 | `tools/verify_iptime_header.py` | legacy local only | Fixed repo-local firmware path. |
 | `tools/analyze_header.py` | legacy local only | Fixed repo-local firmware path. |
