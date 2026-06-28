@@ -159,6 +159,16 @@ A2004MU/RTL8197F include:
 * Initramfs-first bring-up strategy
 * Later factory/sysupgrade strategy
 
+## Kernel Platform Inventory
+
+Kernel/platform inventory was completed against `/home/user/openwrt` at
+`6e9fd1c3ba`. See [kernel-platform-inventory.md](kernel-platform-inventory.md).
+
+Direct RTL8197F platform support is still not confirmed. The existing
+`target/linux/realtek` target is useful as a Realtek MIPS structural reference,
+but it should not be treated as a confirmed base for A2004MU until platform,
+clock, interrupt, timer, UART, SPI, Ethernet, and switch support are verified.
+
 ## Likely Required New Files
 
 Exact target names are not confirmed. Candidate files may include:
