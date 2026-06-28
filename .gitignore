@@ -1,25 +1,37 @@
-# Firmware / flash dumps - do not publish
+# Firmware images and binary blobs
 *.bin
+*.trx
+*.img
+*.fw
+*.ko
+*.so
 *.rom
 *.dump
-*.img
-*.trx
+*.squashfs
 
-# Raw logs may contain MAC addresses or private data
-logs/*raw*
-logs/*original*
+# Local firmware and extraction work
+firmware/
+extracted-rootfs/
+rootfs-*/
+squashfs-root/
+_extract/
+license-audit/
+
+# Generated outputs and temporary files
+build/
+out/
+tmp/
+logs/
+__pycache__/
+*.py[cod]
+*.pyc
+*.log
+*.tmp
+*.bak
 
 # OS/editor junk
 .DS_Store
 Thumbs.db
-*.tmp
-*.bak
-# Windows alternate data stream files
-# 윈도우 Zone.Identifier 파일
-*:Zone.Identifier
 
-# Local-only firmware analysis files
-# 로컬 분석용 펌웨어 파일
-firmware/
-_extract/
-*.squashfs
+# Windows alternate data stream files
+*:Zone.Identifier

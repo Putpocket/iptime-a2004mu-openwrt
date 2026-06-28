@@ -1,102 +1,119 @@
-# ipTIME A2004MU OpenWrt Porting Research
+# ipTIME A2004MU OpenWrt Port Research
 
-ipTIME A2004MU / Realtek RTL8197F router OpenWrt porting research notes.
+This repository contains GitHub-safe notes and tooling for researching an
+OpenWrt port workflow for the ipTIME A2004MU, board alias `a2004m`, based on
+the Realtek RTL8197F platform.
 
-ipTIME A2004MU / Realtek RTL8197F 공유기의 OpenWrt 포팅 연구 기록입니다.
+The goal is to document the hardware, inspect locally available firmware
+artifacts, and eventually prepare an experimental ipTIME web-update style image
+from locally built SDK outputs.
 
-## Device / 장치 정보
+This repository does not provide a flash-verified image.
 
-* Model / 모델: ipTIME A2004MU / a2004m
-* SoC / SoC: Realtek RTL8197F
-* CPU Clock / CPU 클럭: 999MHz
-* RAM / 메모리: 64MB DDR2
-* Flash / 플래시: 8MB SPI NOR, xmc25qh64
-* Serial / 시리얼: 38400 8N1
-* Bootloader / 부트로더: Realtek boot code
-* Bootloader prompt / 부트로더 프롬프트: `<RealTek>`
+## Safety Status
 
-## Current Status / 현재 상태
+This work is experimental and not flash-verified.
 
-| Item                          | Status |
-| ----------------------------- | ------ |
-| UART TX / UART 출력             | OK     |
-| UART RX / UART 입력             | OK     |
-| Bootloader access / 부트로더 진입   | OK     |
-| Stock bootlog / 정펌 부트로그       | OK     |
-| Firmware analysis / 펌웨어 분석    | WIP    |
-| Ethernet / 유선 LAN             | TODO   |
-| SSH / SSH                     | TODO   |
-| Wi-Fi / 무선랜                   | TODO   |
-| Installable image / 설치 가능 이미지 | TODO   |
+Do not flash images produced from this research unless you have independently
+validated the image layout, checksums, boot behavior, and recovery path. This
+repository must not claim that a generated image is safe to flash.
 
-## UART Pinout / UART 핀맵
+Do not commit any of the following:
 
-J1 header, counted from top to bottom.
+* Realtek SDK source files
+* ipTIME stock firmware
+* extracted root filesystems
+* kernel modules or shared libraries
+* license-unclear vendor binaries
+* generated firmware images
 
-J1 헤더를 랜포트 9시 방향 기준 위에서 아래 방향으로 1~4번으로 세었습니다.
+Only GitHub-safe material belongs here: documentation, scripts written from
+scratch, metadata, checksums, patch instructions, and build workflow notes.
 
-| Pin  | Function                                      |
-| ---- | --------------------------------------------- |
-| J1-1 | VCC candidate, do not connect / VCC 후보, 연결 금지 |
-| J1-2 | Router TX / 공유기 TX                            |
-| J1-3 | Router RX / 공유기 RX                            |
-| J1-4 | GND / 그라운드                                    |
+## Known Hardware
 
-## UART Connection / UART 연결
+* Device: ipTIME A2004MU
+* Board alias: `a2004m`
+* SoC: Realtek RTL8197F
+* DRAM: 64 MB DDR2 533 MHz
+* Flash: xmc25qh64, 8 MB SPI NOR
+* Flash erase size: 64 KB
+* Bootloader prompt: `<RealTek>`
+* UART: 38400 8N1
 
-```text
-CP2102 GND  -> J1-4
-CP2102 RXD  -> J1-2
-CP2102 TXD  -> J1-3
-CP2102 VCC  -> Do not connect
-CP2102 3.3V -> Do not connect
-CP2102 5V   -> Do not connect
-```
+Observed stock flash layout:
 
-```text
-CP2102 GND  -> J1-4
-CP2102 RXD  -> J1-2
-CP2102 TXD  -> J1-3
-CP2102 VCC  -> 연결 금지
-CP2102 3.3V -> 연결 금지
-CP2102 5V   -> 연결 금지
-```
+| Region | Range |
+| --- | --- |
+| boot | `0x00000-0x1ffff` |
+| factory | `0x20000-0x2ffff` |
+| config/data | `0x30000-0x3ffff` |
+| firmware | `0x40000-0x7fffff` |
 
-## Bootloader Access / 부트로더 진입
+The firmware region starts at `0x40000`. Do not overwrite below `0x40000`.
 
-Press `ESC` during early boot to interrupt booting.
+## Current Status
 
-부팅 초기에 `ESC`를 누르면 부트로더 진입이 가능합니다.
+* Realtek OpenWrt SDK build succeeded locally.
+* SDK ramfs image was generated locally.
+* Bootloader RAM upload path is not currently available: `XMOD` and TFTP upload
+  were not usable in testing, although Ethernet initialization was observed.
+* SDK generated `AP-fw.bin` is a Realtek `cvimg`/raw image, not an ipTIME web
+  update format image.
+* Earlier notes indicated an SDK image using `linuxpart=0x60000`, which would
+  conflict with the A2004MU firmware region start at `0x40000`.
+* The current locally inspected `AP-fw.bin` reports `linuxpart=0x40000`; keep
+  verifying this on each generated image before serious wrapping work.
+* Next work is image layout and header tooling.
 
-Observed prompt:
+## Local Paths
 
-확인된 프롬프트:
+Expected local research inputs are outside this repository:
 
 ```text
-<RealTek>
+~/rtl8197f-research/openwrt_rtk/rtk_openwrt_sdk
+~/rtl8197f-research/openwrt_rtk/rtk_openwrt_sdk/bin/rtkmipsel
+~/rtl8197f-research/openwrt_rtk/rtk_openwrt_sdk/firmware
 ```
 
-## Goal / 목표
+Do not copy stock firmware or SDK outputs into this repository.
 
-The first goal is a minimal wired-only OpenWrt image.
+Local artifacts that are not safe for git are kept outside this repository:
 
-1차 목표는 유선 LAN과 SSH만 가능한 최소 OpenWrt 이미지입니다.
+```text
+../iptime-a2004mu-local-artifacts/
+```
 
-Initial target:
+The repository is considered GitHub-safe only when this passes:
 
-초기 목표:
+```sh
+bash scripts/check_repo_safety.sh
+```
 
-* Ethernet LAN / 유선 LAN
-* SSH access / SSH 접속
-* No LuCI at first / 초기에는 LuCI 제외
-* No Wi-Fi at first / 초기에는 무선랜 제외
+## Tools
 
-## Warning / 주의
+Inspect a stock firmware file without modifying it:
 
-This project is experimental. Do not flash any image unless you have a recovery plan.
+```sh
+python3 tools/inspect_stock_firmware.py /path/to/stock-firmware.bin
+```
 
-이 프로젝트는 실험 단계입니다. 복구 방법이 확보되지 않은 상태에서 이미지를 플래시에 쓰지 마세요.
+Inspect a Realtek SDK output image without modifying it:
 
-Do not run dangerous bootloader commands unless you know exactly what they do.
+```sh
+python3 tools/inspect_sdk_image.py /path/to/openwrt-rtkmipsel-rtl8197f-AP-fw.bin
+```
 
-정확히 이해하지 못한 상태에서 위험한 부트로더 명령을 실행하지 마세요.
+Check the repository for accidentally committed unsafe files:
+
+```sh
+bash scripts/check_repo_safety.sh
+```
+
+See `docs/repo-safety.md` for local artifact handling and safety checks.
+
+See `docs/tooling.md` for the current tool roles and safety classification.
+
+The experimental image wrapper skeleton intentionally refuses to write output
+unless `--force-experimental` is passed. It is not complete image-generation
+tooling.
