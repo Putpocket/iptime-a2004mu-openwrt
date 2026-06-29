@@ -131,3 +131,6 @@ platform base before connecting a board DTS or image recipe.
   driver references, but no SDK/vendor Ethernet source was imported. Wired LAN
   and SSH remain blocked until a clean-room RTL8197F Ethernet/switch path is
   defined.
+* Created the RTL8197F watchdog clean-room plan. No OpenWrt code was changed,
+  no firmware/image build was performed, and no hardware validation was
+  performed.
