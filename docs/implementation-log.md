@@ -74,3 +74,7 @@ platform base before connecting a board DTS or image recipe.
   `CONFIG_MIPS_RAW_APPENDED_DTB`. `target/linux/compile` now stops at unresolved
   kernel command line policy selection. No firmware, sysupgrade, or factory
   image build was performed; no hardware validation was performed.
+* Selected MIPS command line policy from existing `target/linux/realtek`
+  configs: `CONFIG_MIPS_CMDLINE_FROM_DTB`. `target/linux/compile` now stops at
+  unresolved generic kernel config defaults. No firmware, sysupgrade, or factory
+  image build was performed; no hardware validation was performed.

@@ -173,10 +173,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..609ebd4f35
+index 0000000000..6f5127ec3d
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,24 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -194,6 +194,9 @@ index 0000000000..609ebd4f35
 +# the target convention only; the A2004MU DTS remains a scaffold.
 +# CONFIG_MIPS_NO_APPENDED_DTB is not set
 +CONFIG_MIPS_RAW_APPENDED_DTB=y
++# Existing target/linux/realtek subtargets take kernel arguments from DTB.
++# CONFIG_MIPS_CMDLINE_FROM_BOOTLOADER is not set
++CONFIG_MIPS_CMDLINE_FROM_DTB=y
 +# CONFIG_RTL838X is not set
 +# CONFIG_RTL839X is not set
 +# CONFIG_RTL930X is not set
