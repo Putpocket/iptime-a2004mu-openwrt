@@ -82,3 +82,7 @@ platform base before connecting a board DTS or image recipe.
   pattern. `target/linux/compile` now stops at unresolved memory-management
   kernel config defaults. No firmware, sysupgrade, or factory image build was
   performed; no hardware validation was performed.
+* Selected `CONFIG_PAGE_BLOCK_MAX_ORDER=10` from the existing OpenWrt config
+  pattern. `target/linux/compile` now stops at unresolved Realtek RTL93xx NAND
+  ECC kernel config default. No firmware, sysupgrade, or factory image build was
+  performed; no hardware validation was performed.

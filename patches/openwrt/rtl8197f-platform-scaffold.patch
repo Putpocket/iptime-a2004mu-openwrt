@@ -173,10 +173,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..8c36d00bf5
+index 0000000000..e4bde3620e
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,26 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -185,6 +185,7 @@ index 0000000000..8c36d00bf5
 +# CPU/platform, timer, interrupt, UART, SPI NOR, Ethernet MAC, and switch/PHY
 +# paths are confirmed. Do not copy SDK-derived config.
 +CONFIG_COMPAT_32BIT_TIME=y
++CONFIG_PAGE_BLOCK_MAX_ORDER=10
 +CONFIG_MACH_REALTEK_RTL=y
 +CONFIG_MACH_REALTEK_RTL8197F=y
 +# Stock A2004MU UART log reports: CPU revision is 00019385 (MIPS 24Kc).
