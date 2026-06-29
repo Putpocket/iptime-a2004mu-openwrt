@@ -100,3 +100,9 @@ platform base before connecting a board DTS or image recipe.
   now stops at unresolved `GPIO_REALTEK_OTTO` platform selection. No firmware,
   sysupgrade, or factory image build was performed; no hardware validation was
   performed.
+* Investigated `GPIO_REALTEK_OTTO`; stock logs show RTL8197F GPIO activity, but
+  not compatibility with the existing Realtek Otto GPIO driver. Disabled
+  `CONFIG_GPIO_REALTEK_OTTO` because LED/button work is deferred. The compile
+  now stops at unresolved `MFD_RTL8231` GPIO/LED expander selection. No
+  firmware, sysupgrade, or factory image build was performed; no hardware
+  validation was performed.
