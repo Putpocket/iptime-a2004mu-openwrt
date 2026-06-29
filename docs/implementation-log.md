@@ -9,6 +9,7 @@
 * Defconfig metadata check passed; no firmware/image build performed.
 * Added provisional RTL8197F compatible scaffold patch; not build-validated, not hardware-validated, no firmware/image build performed.
 * Kernel prepare patch apply check passed; no firmware/image build performed, no hardware validation.
+* Added unlinked A2004MU DTS skeleton; not build-linked, not build-validated, not hardware-validated, no firmware/image build.
 * No flashing or device-write instructions included
 * Patch export:
 

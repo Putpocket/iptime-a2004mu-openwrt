@@ -133,3 +133,28 @@ index 0000000000..3ba7d528b1
 + 	{ .compatible = "realtek,rtl9302-soc" },
 + 	{}
 + };
+diff --git a/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
+new file mode 100644
+index 0000000000..c029bcb8ee
+--- /dev/null
++++ b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
++
++/dts-v1/;
++
++/ {
++	model = "ipTIME A2004MU";
++	compatible = "iptime,a2004mu", "realtek,rtl8197f-soc";
++
++	/*
++	 * Clean-room DTS skeleton only.
++	 *
++	 * This file is not build-linked and is not hardware validated.
++	 * Do not add guessed register, IRQ, clock, timer, memory, UART, SPI,
++	 * Ethernet, switch, GPIO, or flash values here.
++	 *
++	 * TODO: Add nodes only after each hardware fact is independently
++	 * verified from public evidence or clean-room observation.
++	 */
++};
