@@ -11,79 +11,31 @@ index b6823f6c73..c8b0608c3f 100644
  
  KERNEL_PATCHVER:=6.18
  
-diff --git a/target/linux/realtek/rtl8197f/target.mk b/target/linux/realtek/rtl8197f/target.mk
+diff --git a/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
 new file mode 100644
-index 0000000000..ae3046b31c
+index 0000000000..c029bcb8ee
 --- /dev/null
-+++ b/target/linux/realtek/rtl8197f/target.mk
-@@ -0,0 +1,13 @@
-+# SPDX-License-Identifier: GPL-2.0-only
-+ARCH:=mips
-+SUBTARGET:=rtl8197f
-+BOARD:=realtek
-+BOARDNAME:=Realtek MIPS RTL8197F scaffold
++++ b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 +
-+# This subtarget is a clean-room scaffold only. CPU_TYPE is intentionally not
-+# set until the RTL8197F CPU/platform path is confirmed from public evidence.
++/dts-v1/;
 +
-+define Target/Description
-+	Provisional scaffold for Realtek RTL8197F platform investigation.
-+	Not build-validated and not validated on hardware.
-+endef
-diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
-new file mode 100644
-index 0000000000..fb5b713494
---- /dev/null
-+++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,7 @@
-+# SPDX-License-Identifier: GPL-2.0-only
-+#
-+# Clean-room RTL8197F scaffold only.
-+#
-+# TODO: Add only independently verified kernel config symbols after the
-+# CPU/platform, timer, interrupt, UART, SPI NOR, Ethernet MAC, and switch/PHY
-+# paths are confirmed. Do not copy SDK-derived config.
-diff --git a/target/linux/realtek/rtl8197f/README.md b/target/linux/realtek/rtl8197f/README.md
-new file mode 100644
-index 0000000000..e313199b1a
---- /dev/null
-+++ b/target/linux/realtek/rtl8197f/README.md
-@@ -0,0 +1,35 @@
-+# RTL8197F Scaffold
++/ {
++	model = "ipTIME A2004MU";
++	compatible = "iptime,a2004mu", "realtek,rtl8197f-soc";
 +
-+This is a clean-room scaffold for RTL8197F investigation.
-+
-+Status:
-+
-+* Not hardware validated.
-+* Not a complete OpenWrt target.
-+* No flash/install instructions.
-+* No SDK vendor code.
-+* No generated firmware output.
-+
-+Required unknowns:
-+
-+* CPU/platform compatibility.
-+* Machine compatible.
-+* Memory map.
-+* UART base/IRQ/clock.
-+* Interrupt controller.
-+* Timer/clocksource.
-+* SPI NOR controller.
-+* Ethernet MAC.
-+* Switch/PHY/MDIO.
-+* GPIO/LED/button.
-+* Image recipe.
-+
-+First milestone:
-+
-+* Kernel boot log over UART.
-+* Then wired LAN + SSH.
-+
-+Deferred:
-+
-+* Wi-Fi.
-+* LuCI.
++	/*
++	 * Clean-room DTS skeleton only.
++	 *
++	 * This file is not build-linked and is not hardware validated.
++	 * Do not add guessed register, IRQ, clock, timer, memory, UART, SPI,
++	 * Ethernet, switch, GPIO, or flash values here.
++	 *
++	 * TODO: Add nodes only after each hardware fact is independently
++	 * verified from public evidence or clean-room observation.
++	 */
++};
 diff --git a/target/linux/realtek/image/rtl8197f.mk b/target/linux/realtek/image/rtl8197f.mk
 new file mode 100644
 index 0000000000..e27a5c7ddf
@@ -145,28 +97,77 @@ index 0000000000..3ba7d528b1
 + 	{ .compatible = "realtek,rtl9302-soc" },
 + 	{}
 + };
-diff --git a/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
+diff --git a/target/linux/realtek/rtl8197f/README.md b/target/linux/realtek/rtl8197f/README.md
 new file mode 100644
-index 0000000000..c029bcb8ee
+index 0000000000..e313199b1a
 --- /dev/null
-+++ b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
-@@ -0,0 +1,19 @@
-+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
++++ b/target/linux/realtek/rtl8197f/README.md
+@@ -0,0 +1,35 @@
++# RTL8197F Scaffold
 +
-+/dts-v1/;
++This is a clean-room scaffold for RTL8197F investigation.
 +
-+/ {
-+	model = "ipTIME A2004MU";
-+	compatible = "iptime,a2004mu", "realtek,rtl8197f-soc";
++Status:
 +
-+	/*
-+	 * Clean-room DTS skeleton only.
-+	 *
-+	 * This file is not build-linked and is not hardware validated.
-+	 * Do not add guessed register, IRQ, clock, timer, memory, UART, SPI,
-+	 * Ethernet, switch, GPIO, or flash values here.
-+	 *
-+	 * TODO: Add nodes only after each hardware fact is independently
-+	 * verified from public evidence or clean-room observation.
-+	 */
-+};
++* Not hardware validated.
++* Not a complete OpenWrt target.
++* No flash/install instructions.
++* No SDK vendor code.
++* No generated firmware output.
++
++Required unknowns:
++
++* CPU/platform compatibility.
++* Machine compatible.
++* Memory map.
++* UART base/IRQ/clock.
++* Interrupt controller.
++* Timer/clocksource.
++* SPI NOR controller.
++* Ethernet MAC.
++* Switch/PHY/MDIO.
++* GPIO/LED/button.
++* Image recipe.
++
++First milestone:
++
++* Kernel boot log over UART.
++* Then wired LAN + SSH.
++
++Deferred:
++
++* Wi-Fi.
++* LuCI.
+diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
+new file mode 100644
+index 0000000000..0524a66a64
+--- /dev/null
++++ b/target/linux/realtek/rtl8197f/config-6.18
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Clean-room RTL8197F scaffold only.
++#
++# TODO: Add only independently verified kernel config symbols after the
++# CPU/platform, timer, interrupt, UART, SPI NOR, Ethernet MAC, and switch/PHY
++# paths are confirmed. Do not copy SDK-derived config.
++CONFIG_MACH_REALTEK_RTL=y
+diff --git a/target/linux/realtek/rtl8197f/target.mk b/target/linux/realtek/rtl8197f/target.mk
+new file mode 100644
+index 0000000000..ae3046b31c
+--- /dev/null
++++ b/target/linux/realtek/rtl8197f/target.mk
+@@ -0,0 +1,13 @@
++# SPDX-License-Identifier: GPL-2.0-only
++ARCH:=mips
++SUBTARGET:=rtl8197f
++BOARD:=realtek
++BOARDNAME:=Realtek MIPS RTL8197F scaffold
++
++# This subtarget is a clean-room scaffold only. CPU_TYPE is intentionally not
++# set until the RTL8197F CPU/platform path is confirmed from public evidence.
++
++define Target/Description
++	Provisional scaffold for Realtek RTL8197F platform investigation.
++	Not build-validated and not validated on hardware.
++endef

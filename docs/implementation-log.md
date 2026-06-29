@@ -54,3 +54,10 @@ A DTS can describe known board facts, but it cannot make the kernel boot if the
 RTL8197F platform entry, timer, interrupt, UART, SPI, and network paths are not
 available. The next implementation step is to validate or create the minimal
 platform base before connecting a board DTS or image recipe.
+
+## Compile Checks
+
+* Host tools and toolchain were prepared; `target/linux/compile` still fails at
+  kernel Kconfig because the scaffold must not guess an RTL838x/RTL839x family
+  selection for RTL8197F. No firmware, sysupgrade, or factory image build was
+  performed; no hardware validation was performed.
