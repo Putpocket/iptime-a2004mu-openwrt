@@ -123,3 +123,11 @@ platform base before connecting a board DTS or image recipe.
   panic workaround. The existing Otto watchdog path is not selected for
   RTL8197F without compatibility evidence. No SDK/vendor watchdog source was
   imported; watchdog handling remains a boot-risk blocker.
+* Investigated the Ethernet/MAC/switch blocker. Stock logs show `eth0`,
+  `eth1`, `peth0 -> eth1`, switch API `v1.2.12`, and switch chip id
+  `0x6367-0020`, but current OpenWrt realtek Ethernet/PCS/MDIO/DSA matches are
+  RTL83xx/RTL93xx/Otto-oriented and no RTL8197F MAC/switch compatible was
+  found. Local audit artifacts contain RTL819x and RTL8367/RTL8370 switch
+  driver references, but no SDK/vendor Ethernet source was imported. Wired LAN
+  and SSH remain blocked until a clean-room RTL8197F Ethernet/switch path is
+  defined.
