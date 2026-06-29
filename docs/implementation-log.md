@@ -12,6 +12,7 @@
 * Added unlinked A2004MU DTS skeleton; not build-linked, not build-validated, not hardware-validated, no firmware/image build.
 * Added minimal A2004MU device profile; no flash layout guessed, not build-validated, not hardware-validated, no firmware/image build.
 * Explicit A2004MU device profile defconfig check passed; no firmware/image build performed, no hardware validation.
+* `target/linux/compile` attempted; failed on missing toolchain/host tools, no firmware/sysupgrade/factory image build, no hardware validation.
 * No flashing or device-write instructions included
 * Patch export:
 
