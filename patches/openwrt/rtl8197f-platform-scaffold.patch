@@ -173,10 +173,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..7e8fe4bcce
+index 0000000000..56fb6b5b1a
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,50 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -218,6 +218,11 @@ index 0000000000..7e8fe4bcce
 +# Stock logs prove RTL8197F has GPIO, but not compatibility with the existing
 +# Realtek Otto GPIO driver. LEDs/buttons are deferred.
 +# CONFIG_GPIO_REALTEK_OTTO is not set
++# Existing realtek switch boards may use RTL8231 GPIO/LED expanders. No A2004MU
++# evidence currently shows an RTL8231, and LEDs/buttons are deferred.
++# CONFIG_LEDS_RTL8231 is not set
++# CONFIG_MFD_RTL8231 is not set
++# CONFIG_PINCTRL_RTL8231 is not set
 +# CONFIG_RTL838X is not set
 +# CONFIG_RTL839X is not set
 +# CONFIG_RTL930X is not set

@@ -106,3 +106,9 @@ platform base before connecting a board DTS or image recipe.
   now stops at unresolved `MFD_RTL8231` GPIO/LED expander selection. No
   firmware, sysupgrade, or factory image build was performed; no hardware
   validation was performed.
+* Investigated `MFD_RTL8231`; existing realtek switch-board DTS files use
+  RTL8231 GPIO/LED expanders, but no A2004MU evidence shows an RTL8231 device.
+  Disabled `CONFIG_MFD_RTL8231`, `CONFIG_PINCTRL_RTL8231`, and
+  `CONFIG_LEDS_RTL8231`. The compile now stops at unresolved `COMMON_CLK`
+  selection. No firmware, sysupgrade, or factory image build was performed; no
+  hardware validation was performed.
