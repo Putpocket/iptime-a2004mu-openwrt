@@ -117,3 +117,9 @@ platform base before connecting a board DTS or image recipe.
   now stops at unresolved `REALTEK_OTTO_WDT` watchdog selection. No firmware,
   sysupgrade, or factory image build was performed; no hardware validation was
   performed.
+* Investigated the `REALTEK_OTTO_WDT` blocker. Stock UART logs do not show a
+  watchdog driver line, while local audit artifacts show RTL819x-specific
+  watchdog references (`rtl819x_wdt.c`, `120-rtk-819x_watchdog.patch`) and a
+  panic workaround. The existing Otto watchdog path is not selected for
+  RTL8197F without compatibility evidence. No SDK/vendor watchdog source was
+  imported; watchdog handling remains a boot-risk blocker.
