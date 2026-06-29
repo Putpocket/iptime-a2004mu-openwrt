@@ -137,3 +137,7 @@ platform base before connecting a board DTS or image recipe.
 * Created the RTL8197F Ethernet clean-room plan. No OpenWrt code was changed,
   no firmware/image build was performed, and no hardware validation was
   performed.
+* Applied a compile-only workaround for unresolved `REALTEK_OTTO_WDT` and used
+  the existing realtek early-printk config pattern; `target/linux/compile`
+  passed. No firmware/sysupgrade/factory image build or hardware validation was
+  performed.
