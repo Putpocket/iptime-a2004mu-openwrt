@@ -8,6 +8,7 @@
 * Status: not build-validated, not hardware-validated
 * Defconfig metadata check passed; no firmware/image build performed.
 * Added provisional RTL8197F compatible scaffold patch; not build-validated, not hardware-validated, no firmware/image build performed.
+* Kernel prepare patch apply check passed; no firmware/image build performed, no hardware validation.
 * No flashing or device-write instructions included
 * Patch export:
 
