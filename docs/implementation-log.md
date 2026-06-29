@@ -134,3 +134,6 @@ platform base before connecting a board DTS or image recipe.
 * Created the RTL8197F watchdog clean-room plan. No OpenWrt code was changed,
   no firmware/image build was performed, and no hardware validation was
   performed.
+* Created the RTL8197F Ethernet clean-room plan. No OpenWrt code was changed,
+  no firmware/image build was performed, and no hardware validation was
+  performed.
