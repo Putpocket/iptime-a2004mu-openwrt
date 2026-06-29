@@ -65,3 +65,8 @@ platform base before connecting a board DTS or image recipe.
   `target/linux/compile` now stops at unresolved MIPS32 CPU type selection; no
   firmware, sysupgrade, or factory image build was performed; no hardware
   validation was performed.
+* CPU type evidence found in the stock UART log: `CPU revision is: 00019385
+  (MIPS 24Kc)`. Selected `CONFIG_CPU_MIPS32_R2`; `target/linux/compile` now
+  stops at unresolved appended-DTB kernel config selection. No firmware,
+  sysupgrade, or factory image build was performed; no hardware validation was
+  performed.
