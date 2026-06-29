@@ -78,3 +78,7 @@ platform base before connecting a board DTS or image recipe.
   configs: `CONFIG_MIPS_CMDLINE_FROM_DTB`. `target/linux/compile` now stops at
   unresolved generic kernel config defaults. No firmware, sysupgrade, or factory
   image build was performed; no hardware validation was performed.
+* Selected `CONFIG_COMPAT_32BIT_TIME` from the existing OpenWrt realtek config
+  pattern. `target/linux/compile` now stops at unresolved memory-management
+  kernel config defaults. No firmware, sysupgrade, or factory image build was
+  performed; no hardware validation was performed.
