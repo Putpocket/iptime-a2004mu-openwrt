@@ -61,3 +61,7 @@ platform base before connecting a board DTS or image recipe.
   kernel Kconfig because the scaffold must not guess an RTL838x/RTL839x family
   selection for RTL8197F. No firmware, sysupgrade, or factory image build was
   performed; no hardware validation was performed.
+* Added RTL8197F Kconfig scaffold without selecting RTL838x/RTL839x/RTL930x/RTL931x.
+  `target/linux/compile` now stops at unresolved MIPS32 CPU type selection; no
+  firmware, sysupgrade, or factory image build was performed; no hardware
+  validation was performed.

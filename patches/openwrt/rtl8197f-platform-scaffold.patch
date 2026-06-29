@@ -97,6 +97,39 @@ index 0000000000..3ba7d528b1
 + 	{ .compatible = "realtek,rtl9302-soc" },
 + 	{}
 + };
+diff --git a/target/linux/realtek/patches-6.18/301-mips-realtek-add-rtl8197f-kconfig-scaffold.patch b/target/linux/realtek/patches-6.18/301-mips-realtek-add-rtl8197f-kconfig-scaffold.patch
+new file mode 100644
+index 0000000000..c4b0fe3375
+--- /dev/null
++++ b/target/linux/realtek/patches-6.18/301-mips-realtek-add-rtl8197f-kconfig-scaffold.patch
+@@ -0,0 +1,27 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: A2004MU OpenWrt Research <noreply@example.invalid>
++Date: Mon, 29 Jun 2026 00:00:00 +0900
++Subject: [PATCH] mips: realtek: add RTL8197F Kconfig scaffold
++
++Add a provisional RTL8197F Kconfig symbol under the existing Realtek MIPS
++machine family. This is a clean-room scaffold only and is not hardware
++validated.
++
++This deliberately does not select RTL838X, RTL839X, RTL930X, or RTL931X, and
++does not add register, IRQ, clock, timer, or driver assumptions.
++---
++--- a/arch/mips/Kconfig
+++++ b/arch/mips/Kconfig
++@@ -1086,6 +1086,12 @@ config RTL931X
++ 	select SYS_SUPPORTS_SMP
++ 	select SYS_SUPPORTS_MIPS_CPS
++ 
+++config MACH_REALTEK_RTL8197F
+++	bool "Realtek RTL8197F scaffold"
+++	depends on MACH_REALTEK_RTL
+++	help
+++	  Clean-room scaffold only; not hardware validated.
+++
++ source "arch/mips/alchemy/Kconfig"
++ source "arch/mips/ath25/Kconfig"
++ source "arch/mips/ath79/Kconfig"
 diff --git a/target/linux/realtek/rtl8197f/README.md b/target/linux/realtek/rtl8197f/README.md
 new file mode 100644
 index 0000000000..e313199b1a
@@ -140,10 +173,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..0524a66a64
+index 0000000000..99ef4cc038
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,13 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -152,6 +185,11 @@ index 0000000000..0524a66a64
 +# CPU/platform, timer, interrupt, UART, SPI NOR, Ethernet MAC, and switch/PHY
 +# paths are confirmed. Do not copy SDK-derived config.
 +CONFIG_MACH_REALTEK_RTL=y
++CONFIG_MACH_REALTEK_RTL8197F=y
++# CONFIG_RTL838X is not set
++# CONFIG_RTL839X is not set
++# CONFIG_RTL930X is not set
++# CONFIG_RTL931X is not set
 diff --git a/target/linux/realtek/rtl8197f/target.mk b/target/linux/realtek/rtl8197f/target.mk
 new file mode 100644
 index 0000000000..ae3046b31c
