@@ -7,6 +7,7 @@
 * Purpose: first clean-room scaffold for RTL8197F platform investigation
 * Status: not build-validated, not hardware-validated
 * Defconfig metadata check passed; no firmware/image build performed.
+* Added provisional RTL8197F compatible scaffold patch; not build-validated, not hardware-validated, no firmware/image build performed.
 * No flashing or device-write instructions included
 * Patch export:
 
