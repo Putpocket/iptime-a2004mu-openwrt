@@ -86,3 +86,10 @@ platform base before connecting a board DTS or image recipe.
   pattern. `target/linux/compile` now stops at unresolved Realtek RTL93xx NAND
   ECC kernel config default. No firmware, sysupgrade, or factory image build was
   performed; no hardware validation was performed.
+* Investigated `MTD_NAND_ECC_REALTEK`; stock A2004MU boot evidence reports
+  `xmc25qh64` SPI NOR on `m25p80`, and existing non-NAND OpenWrt realtek
+  configs disable Realtek NAND ECC/SPI NAND while enabling SPI NOR. Selected
+  those non-NAND config values for the scaffold. `target/linux/compile` now
+  stops at unresolved `NET_RTL838X` Ethernet driver selection. No firmware,
+  sysupgrade, or factory image build was performed; no hardware validation was
+  performed.
