@@ -141,3 +141,4 @@ platform base before connecting a board DTS or image recipe.
   the existing realtek early-printk config pattern; `target/linux/compile`
   passed. No firmware/sysupgrade/factory image build or hardware validation was
   performed.
+* Enabled the minimal A2004MU default OpenWrt image path with `IMAGE_SIZE := 8192k`; `target/linux/install` passed and produced default OpenWrt initramfs/sysupgrade artifacts, but no ipTIME web-admin wrapper/factory image or hardware validation was performed.
