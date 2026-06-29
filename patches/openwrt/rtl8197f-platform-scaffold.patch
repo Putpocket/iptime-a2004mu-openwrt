@@ -173,10 +173,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..637d4a540f
+index 0000000000..653cb143ff
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,42 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -208,6 +208,13 @@ index 0000000000..637d4a540f
 +CONFIG_SPI_MASTER=y
 +CONFIG_SPI_MEM=y
 +# CONFIG_SPI_REALTEK_SNAND is not set
++# The existing OpenWrt realtek Ethernet MAC driver is RTL838x/RTL83xx/RTL93xx
++# oriented. A2004MU stock logs prove Ethernet exists, but not RTL838x MAC
++# compatibility.
++# CONFIG_NET_RTL838X is not set
++# Existing OpenWrt realtek subtargets use the Realtek Otto SerDes PCS driver.
++# No A2004MU evidence currently proves RTL8197F uses that PCS path.
++# CONFIG_PCS_RTL_OTTO is not set
 +# CONFIG_RTL838X is not set
 +# CONFIG_RTL839X is not set
 +# CONFIG_RTL930X is not set

@@ -93,3 +93,10 @@ platform base before connecting a board DTS or image recipe.
   stops at unresolved `NET_RTL838X` Ethernet driver selection. No firmware,
   sysupgrade, or factory image build was performed; no hardware validation was
   performed.
+* Investigated `NET_RTL838X`; existing OpenWrt realtek configs select the
+  RTL83xx/RTL93xx Ethernet path, but A2004MU evidence only proves stock
+  Ethernet exists and does not prove RTL838x MAC compatibility. Disabled
+  `CONFIG_NET_RTL838X` and `CONFIG_PCS_RTL_OTTO` for the scaffold. The compile
+  now stops at unresolved `GPIO_REALTEK_OTTO` platform selection. No firmware,
+  sysupgrade, or factory image build was performed; no hardware validation was
+  performed.
