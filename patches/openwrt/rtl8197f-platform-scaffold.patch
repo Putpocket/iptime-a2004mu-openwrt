@@ -173,10 +173,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..56fb6b5b1a
+index 0000000000..c2e7db0a5d
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,55 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -185,6 +185,11 @@ index 0000000000..56fb6b5b1a
 +# CPU/platform, timer, interrupt, UART, SPI NOR, Ethernet MAC, and switch/PHY
 +# paths are confirmed. Do not copy SDK-derived config.
 +CONFIG_COMPAT_32BIT_TIME=y
++CONFIG_COMMON_CLK=y
++# Existing realtek subtargets all enable the generic common clock framework, but
++# only some enable Realtek-specific RTL83xx clock drivers. RTL8197F clock driver
++# compatibility is not confirmed.
++# CONFIG_COMMON_CLK_REALTEK is not set
 +CONFIG_PAGE_BLOCK_MAX_ORDER=10
 +CONFIG_MACH_REALTEK_RTL=y
 +CONFIG_MACH_REALTEK_RTL8197F=y

@@ -112,3 +112,8 @@ platform base before connecting a board DTS or image recipe.
   `CONFIG_LEDS_RTL8231`. The compile now stops at unresolved `COMMON_CLK`
   selection. No firmware, sysupgrade, or factory image build was performed; no
   hardware validation was performed.
+* Selected generic `CONFIG_COMMON_CLK` from the existing OpenWrt realtek config
+  pattern while leaving Realtek-specific clock drivers disabled. The compile
+  now stops at unresolved `REALTEK_OTTO_WDT` watchdog selection. No firmware,
+  sysupgrade, or factory image build was performed; no hardware validation was
+  performed.
