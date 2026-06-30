@@ -80,7 +80,9 @@ def build_image(
     rootfs_blob = openwrt_data[squashfs_offset:]
 
     header, cr6b_template = read_template(template_data)
-    kernel_blob = cr6b_template + kernel_body
+    cr6b_header = bytearray(cr6b_template)
+    struct.pack_into(">I", cr6b_header, 0x0C, len(kernel_body))
+    kernel_blob = bytes(cr6b_header) + kernel_body
 
     requested_rootfs_offset = None
     if rootfs_offset_arg == "auto":
