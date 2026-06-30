@@ -38,10 +38,10 @@ index 0000000000..c029bcb8ee
 +};
 diff --git a/target/linux/realtek/image/rtl8197f.mk b/target/linux/realtek/image/rtl8197f.mk
 new file mode 100644
-index 0000000000..b6b216b67f
+index 0000000000..4d38a6b11b
 --- /dev/null
 +++ b/target/linux/realtek/image/rtl8197f.mk
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,16 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -53,6 +53,7 @@ index 0000000000..b6b216b67f
 +  DEVICE_PACKAGES :=
 +  DEFAULT := n
 +  IMAGE_SIZE := 8192k
++  $(Device/kernel-lzma)
 +  # Build-system scaffold only. This uses the default OpenWrt sysupgrade image
 +  # path for size checking and does not implement the ipTIME web-admin wrapper.
 +endef

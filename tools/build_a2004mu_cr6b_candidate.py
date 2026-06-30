@@ -94,6 +94,11 @@ def build_image(
 
     min_rootfs_offset = align_up(CR6B_OFFSET + len(kernel_blob), 0x10000)
     if rootfs_offset < min_rootfs_offset:
+        if requested_rootfs_offset is not None:
+            raise ValueError(
+                "requested rootfs offset overlaps kernel: "
+                f"requested=0x{requested_rootfs_offset:x} minimum=0x{min_rootfs_offset:x}"
+            )
         rootfs_offset = min_rootfs_offset
 
     file_size = rootfs_offset + len(rootfs_blob)
