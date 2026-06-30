@@ -224,10 +224,10 @@ index 0000000000..f20ec0dc63
 ++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
 new file mode 100644
-index 0000000000..f3605df3ff
+index 0000000000..21737407e1
 --- /dev/null
 +++ b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,391 @@
 +From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 +From: A2004MU Clean-room Scaffold <noreply@example.invalid>
 +Date: Tue, 30 Jun 2026 00:00:00 +0900
@@ -240,8 +240,8 @@ index 0000000000..f3605df3ff
 +---
 + drivers/net/ethernet/Kconfig        | 16 ++++++--
 + drivers/net/ethernet/Makefile       |  1 +
-+ drivers/net/ethernet/rtl8197f_eth.c | 156 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-+ 3 files changed, 164 insertions(+), 4 deletions(-)
++ drivers/net/ethernet/rtl8197f_eth.c | 338 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++ 3 files changed, 355 insertions(+), 4 deletions(-)
 + create mode 100644 drivers/net/ethernet/rtl8197f_eth.c
 +
 +--- a/drivers/net/ethernet/Kconfig
@@ -280,18 +280,21 @@ index 0000000000..f3605df3ff
 + obj-$(CONFIG_NET_VENDOR_SILAN) += silan/
 +--- /dev/null
 ++++ b/drivers/net/ethernet/rtl8197f_eth.c
-+@@ -0,0 +1,156 @@
++@@ -0,0 +1,338 @@
 ++// SPDX-License-Identifier: GPL-2.0-only
 ++/*
-++ * Clean-room RTL8197F Ethernet scaffold.
+++ * Clean-room RTL8197F Ethernet driver.
 ++ *
-++ * This driver intentionally keeps the RTL8197F path separate from the
-++ * RTL838x/RTL93xx/Otto Ethernet driver. It allocates a net_device only when
-++ * the platform supplies MMIO and IRQ resources, but it does not program DMA,
-++ * MDIO, PHY, switch, TX, or RX registers until those facts are independently
-++ * verified.
+++ * This driver keeps RTL8197F separate from the RTL838x/RTL93xx/Otto Ethernet
+++ * path. The DMA ring model is derived from GPL-2.0 Realtek rtl865x software
+++ * NIC sources, but register offsets, descriptor ABI details, MDIO operations,
+++ * and switch setup are intentionally not copied from non-GPL headers. Until a
+++ * license-compatible register map is available, the driver allocates the
+++ * netdev and DMA resources but refuses to start the datapath.
 ++ */
 ++
+++#include <linux/bitops.h>
+++#include <linux/dma-mapping.h>
 ++#include <linux/etherdevice.h>
 ++#include <linux/interrupt.h>
 ++#include <linux/io.h>
@@ -299,32 +302,199 @@ index 0000000000..f3605df3ff
 ++#include <linux/mod_devicetable.h>
 ++#include <linux/netdevice.h>
 ++#include <linux/platform_device.h>
+++#include <linux/skbuff.h>
 ++
-++struct rtl8197f_eth_priv {
-++	void __iomem *base;
-++	int irq;
-++	bool datapath_ready;
-++	struct net_device *ndev;
+++#define RTL8197F_ETH_TX_DESC_NUM	128
+++#define RTL8197F_ETH_RX_DESC_NUM	256
+++#define RTL8197F_ETH_RX_BUF_SIZE	2048
+++
+++/* Clean-room descriptor placeholder: not written to hardware yet. */
+++#define RTL8197F_DESC_HW_OWN		BIT(0)
+++#define RTL8197F_DESC_WRAP		BIT(1)
+++
+++struct rtl8197f_eth_desc {
+++	__le32 addr;
+++	__le32 length;
+++	__le32 flags;
+++	__le32 reserved;
 ++};
 ++
-++static int rtl8197f_eth_open(struct net_device *ndev)
+++struct rtl8197f_eth_priv {
+++	struct net_device *ndev;
+++	struct napi_struct napi;
+++	void __iomem *base;
+++	int irq;
+++
+++	struct rtl8197f_eth_desc *tx_ring;
+++	dma_addr_t tx_ring_dma;
+++	struct rtl8197f_eth_desc *rx_ring;
+++	dma_addr_t rx_ring_dma;
+++	struct sk_buff *rx_skb[RTL8197F_ETH_RX_DESC_NUM];
+++	dma_addr_t rx_dma[RTL8197F_ETH_RX_DESC_NUM];
+++
+++	bool rings_ready;
+++	bool datapath_ready;
+++};
+++
+++static void rtl8197f_eth_free_rings(struct net_device *ndev)
+++{
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
+++	struct device *dev = ndev->dev.parent;
+++	unsigned int i;
+++
+++	for (i = 0; i < RTL8197F_ETH_RX_DESC_NUM; i++) {
+++		if (!priv->rx_skb[i])
+++			continue;
+++
+++		dma_unmap_single(dev, priv->rx_dma[i], RTL8197F_ETH_RX_BUF_SIZE,
+++				 DMA_FROM_DEVICE);
+++		dev_kfree_skb_any(priv->rx_skb[i]);
+++		priv->rx_skb[i] = NULL;
+++		priv->rx_dma[i] = 0;
+++	}
+++
+++	if (priv->rx_ring) {
+++		dma_free_coherent(dev, sizeof(*priv->rx_ring) *
+++				  RTL8197F_ETH_RX_DESC_NUM, priv->rx_ring,
+++				  priv->rx_ring_dma);
+++		priv->rx_ring = NULL;
+++		priv->rx_ring_dma = 0;
+++	}
+++
+++	if (priv->tx_ring) {
+++		dma_free_coherent(dev, sizeof(*priv->tx_ring) *
+++				  RTL8197F_ETH_TX_DESC_NUM, priv->tx_ring,
+++				  priv->tx_ring_dma);
+++		priv->tx_ring = NULL;
+++		priv->tx_ring_dma = 0;
+++	}
+++
+++	priv->rings_ready = false;
+++}
+++
+++static int rtl8197f_eth_alloc_rings(struct net_device *ndev)
+++{
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
+++	struct device *dev = ndev->dev.parent;
+++	unsigned int i;
+++	__le32 flags;
+++
+++	if (priv->rings_ready)
+++		return 0;
+++
+++	priv->tx_ring = dma_alloc_coherent(dev, sizeof(*priv->tx_ring) *
+++					RTL8197F_ETH_TX_DESC_NUM,
+++					&priv->tx_ring_dma, GFP_KERNEL);
+++	if (!priv->tx_ring)
+++		return -ENOMEM;
+++
+++	priv->rx_ring = dma_alloc_coherent(dev, sizeof(*priv->rx_ring) *
+++					RTL8197F_ETH_RX_DESC_NUM,
+++					&priv->rx_ring_dma, GFP_KERNEL);
+++	if (!priv->rx_ring) {
+++		rtl8197f_eth_free_rings(ndev);
+++		return -ENOMEM;
+++	}
+++
+++	for (i = 0; i < RTL8197F_ETH_RX_DESC_NUM; i++) {
+++		struct sk_buff *skb;
+++		dma_addr_t dma;
+++
+++		skb = netdev_alloc_skb(ndev, RTL8197F_ETH_RX_BUF_SIZE);
+++		if (!skb) {
+++			rtl8197f_eth_free_rings(ndev);
+++			return -ENOMEM;
+++		}
+++
+++		dma = dma_map_single(dev, skb->data, RTL8197F_ETH_RX_BUF_SIZE,
+++				     DMA_FROM_DEVICE);
+++		if (dma_mapping_error(dev, dma)) {
+++			dev_kfree_skb_any(skb);
+++			rtl8197f_eth_free_rings(ndev);
+++			return -ENOMEM;
+++		}
+++
+++		priv->rx_skb[i] = skb;
+++		priv->rx_dma[i] = dma;
+++		priv->rx_ring[i].addr = cpu_to_le32(lower_32_bits(dma));
+++		priv->rx_ring[i].length = cpu_to_le32(RTL8197F_ETH_RX_BUF_SIZE);
+++
+++		flags = cpu_to_le32(RTL8197F_DESC_HW_OWN);
+++		if (i == RTL8197F_ETH_RX_DESC_NUM - 1)
+++			flags |= cpu_to_le32(RTL8197F_DESC_WRAP);
+++		priv->rx_ring[i].flags = flags;
+++	}
+++
+++	for (i = 0; i < RTL8197F_ETH_TX_DESC_NUM; i++) {
+++		flags = 0;
+++		if (i == RTL8197F_ETH_TX_DESC_NUM - 1)
+++			flags |= cpu_to_le32(RTL8197F_DESC_WRAP);
+++		priv->tx_ring[i].flags = flags;
+++	}
+++
+++	priv->rings_ready = true;
+++
+++	return 0;
+++}
+++
+++static int rtl8197f_eth_hw_start(struct net_device *ndev)
 ++{
 ++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
 ++
 ++	if (!priv->datapath_ready) {
 ++		netdev_warn(ndev,
-++			    "datapath registers unresolved; refusing to start\n");
+++			    "MAC/MDIO register map unresolved; datapath disabled\n");
 ++		return -EOPNOTSUPP;
 ++	}
 ++
+++	return 0;
+++}
+++
+++static int rtl8197f_eth_poll(struct napi_struct *napi, int budget)
+++{
+++	struct rtl8197f_eth_priv *priv = container_of(napi,
+++						       struct rtl8197f_eth_priv, napi);
+++
+++	if (!priv->datapath_ready) {
+++		napi_complete_done(napi, 0);
+++		return 0;
+++	}
+++
+++	napi_complete_done(napi, 0);
+++
+++	return 0;
+++}
+++
+++static int rtl8197f_eth_open(struct net_device *ndev)
+++{
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
+++	int err;
+++
+++	err = rtl8197f_eth_alloc_rings(ndev);
+++	if (err)
+++		return err;
+++
+++	err = rtl8197f_eth_hw_start(ndev);
+++	if (err) {
+++		rtl8197f_eth_free_rings(ndev);
+++		return err;
+++	}
+++
+++	napi_enable(&priv->napi);
 ++	netif_start_queue(ndev);
+++	netif_carrier_on(ndev);
 ++
 ++	return 0;
 ++}
 ++
 ++static int rtl8197f_eth_stop(struct net_device *ndev)
 ++{
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
+++
+++	netif_carrier_off(ndev);
 ++	netif_stop_queue(ndev);
+++	napi_disable(&priv->napi);
+++	rtl8197f_eth_free_rings(ndev);
 ++
 ++	return 0;
 ++}
@@ -337,7 +507,7 @@ index 0000000000..f3605df3ff
 ++	if (!priv->datapath_ready) {
 ++		netif_stop_queue(ndev);
 ++		netdev_warn_once(ndev,
-++				 "TX datapath unresolved; queue stopped\n");
+++				 "TX registers unresolved; queue stopped\n");
 ++		return NETDEV_TX_BUSY;
 ++	}
 ++
@@ -355,11 +525,17 @@ index 0000000000..f3605df3ff
 ++static irqreturn_t rtl8197f_eth_irq(int irq, void *data)
 ++{
 ++	struct net_device *ndev = data;
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
 ++
-++	netdev_warn_once(ndev,
-++			 "IRQ asserted before interrupt registers are implemented\n");
+++	if (!priv->datapath_ready) {
+++		netdev_warn_once(ndev,
+++				 "IRQ asserted before interrupt registers are implemented\n");
+++		return IRQ_NONE;
+++	}
 ++
-++	return IRQ_NONE;
+++	napi_schedule(&priv->napi);
+++
+++	return IRQ_HANDLED;
 ++}
 ++
 ++static int rtl8197f_eth_probe(struct platform_device *pdev)
@@ -397,16 +573,19 @@ index 0000000000..f3605df3ff
 ++				     "failed to request RTL8197F Ethernet IRQ\n");
 ++
 ++	ndev->netdev_ops = &rtl8197f_eth_netdev_ops;
+++	netif_napi_add_weight(ndev, &priv->napi, rtl8197f_eth_poll, 64);
 ++	netif_carrier_off(ndev);
 ++	eth_hw_addr_random(ndev);
 ++
 ++	err = register_netdev(ndev);
-++	if (err)
+++	if (err) {
+++		netif_napi_del(&priv->napi);
 ++		return dev_err_probe(&pdev->dev, err,
 ++				     "failed to register RTL8197F Ethernet netdev\n");
+++	}
 ++
 ++	netdev_warn(ndev,
-++		    "registered scaffold netdev; DMA/MDIO/switch datapath disabled\n");
+++		    "registered; DMA rings prepared but MAC/MDIO datapath disabled\n");
 ++
 ++	return 0;
 ++}
@@ -414,8 +593,11 @@ index 0000000000..f3605df3ff
 ++static void rtl8197f_eth_remove(struct platform_device *pdev)
 ++{
 ++	struct net_device *ndev = platform_get_drvdata(pdev);
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
 ++
 ++	unregister_netdev(ndev);
+++	netif_napi_del(&priv->napi);
+++	rtl8197f_eth_free_rings(ndev);
 ++}
 ++
 ++static const struct of_device_id rtl8197f_eth_of_match[] = {
@@ -434,8 +616,8 @@ index 0000000000..f3605df3ff
 ++};
 ++module_platform_driver(rtl8197f_eth_driver);
 ++
-++MODULE_AUTHOR("A2004MU clean-room scaffold");
-++MODULE_DESCRIPTION("RTL8197F Ethernet scaffold netdev driver");
+++MODULE_AUTHOR("A2004MU clean-room port");
+++MODULE_DESCRIPTION("RTL8197F Ethernet netdev driver");
 ++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/rtl8197f/README.md b/target/linux/realtek/rtl8197f/README.md
 new file mode 100644
