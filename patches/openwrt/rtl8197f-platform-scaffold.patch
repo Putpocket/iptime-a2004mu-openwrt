@@ -224,10 +224,10 @@ index 0000000000..f20ec0dc63
 ++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
 new file mode 100644
-index 0000000000..7b8ac8a692
+index 0000000000..f3605df3ff
 --- /dev/null
 +++ b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,209 @@
 +From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 +From: A2004MU Clean-room Scaffold <noreply@example.invalid>
 +Date: Tue, 30 Jun 2026 00:00:00 +0900
@@ -240,8 +240,8 @@ index 0000000000..7b8ac8a692
 +---
 + drivers/net/ethernet/Kconfig        | 16 ++++++--
 + drivers/net/ethernet/Makefile       |  1 +
-+ drivers/net/ethernet/rtl8197f_eth.c | 139 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-+ 3 files changed, 152 insertions(+), 4 deletions(-)
++ drivers/net/ethernet/rtl8197f_eth.c | 156 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++ 3 files changed, 164 insertions(+), 4 deletions(-)
 + create mode 100644 drivers/net/ethernet/rtl8197f_eth.c
 +
 +--- a/drivers/net/ethernet/Kconfig
@@ -280,7 +280,7 @@ index 0000000000..7b8ac8a692
 + obj-$(CONFIG_NET_VENDOR_SILAN) += silan/
 +--- /dev/null
 ++++ b/drivers/net/ethernet/rtl8197f_eth.c
-+@@ -0,0 +1,139 @@
++@@ -0,0 +1,156 @@
 ++// SPDX-License-Identifier: GPL-2.0-only
 ++/*
 ++ * Clean-room RTL8197F Ethernet scaffold.
@@ -303,15 +303,23 @@ index 0000000000..7b8ac8a692
 ++struct rtl8197f_eth_priv {
 ++	void __iomem *base;
 ++	int irq;
+++	bool datapath_ready;
 ++	struct net_device *ndev;
 ++};
 ++
 ++static int rtl8197f_eth_open(struct net_device *ndev)
 ++{
-++	netdev_warn(ndev,
-++		    "datapath registers unresolved; interface remains stopped\n");
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
 ++
-++	return -EOPNOTSUPP;
+++	if (!priv->datapath_ready) {
+++		netdev_warn(ndev,
+++			    "datapath registers unresolved; refusing to start\n");
+++		return -EOPNOTSUPP;
+++	}
+++
+++	netif_start_queue(ndev);
+++
+++	return 0;
 ++}
 ++
 ++static int rtl8197f_eth_stop(struct net_device *ndev)
@@ -324,11 +332,16 @@ index 0000000000..7b8ac8a692
 ++static netdev_tx_t rtl8197f_eth_start_xmit(struct sk_buff *skb,
 ++						   struct net_device *ndev)
 ++{
-++	dev_kfree_skb(skb);
-++	netdev_warn_once(ndev,
-++			 "TX datapath unresolved; dropped scaffold packet\n");
+++	struct rtl8197f_eth_priv *priv = netdev_priv(ndev);
 ++
-++	return NETDEV_TX_OK;
+++	if (!priv->datapath_ready) {
+++		netif_stop_queue(ndev);
+++		netdev_warn_once(ndev,
+++				 "TX datapath unresolved; queue stopped\n");
+++		return NETDEV_TX_BUSY;
+++	}
+++
+++	return NETDEV_TX_BUSY;
 ++}
 ++
 ++static const struct net_device_ops rtl8197f_eth_netdev_ops = {
@@ -384,6 +397,7 @@ index 0000000000..7b8ac8a692
 ++				     "failed to request RTL8197F Ethernet IRQ\n");
 ++
 ++	ndev->netdev_ops = &rtl8197f_eth_netdev_ops;
+++	netif_carrier_off(ndev);
 ++	eth_hw_addr_random(ndev);
 ++
 ++	err = register_netdev(ndev);
@@ -392,7 +406,7 @@ index 0000000000..7b8ac8a692
 ++				     "failed to register RTL8197F Ethernet netdev\n");
 ++
 ++	netdev_warn(ndev,
-++		    "registered scaffold netdev; DMA/MDIO/switch datapath unresolved\n");
+++		    "registered scaffold netdev; DMA/MDIO/switch datapath disabled\n");
 ++
 ++	return 0;
 ++}
