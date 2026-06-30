@@ -364,7 +364,7 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..547fd496e8
+index 0000000000..7a7582aadf
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
 @@ -0,0 +1,66 @@
@@ -429,7 +429,7 @@ index 0000000000..547fd496e8
 +# DTS paths. This is a compile-only workaround; RTL8197F watchdog handling is a
 +# boot-risk blocker until independently implemented.
 +# CONFIG_REALTEK_OTTO_WDT is not set
-+# CONFIG_RTL8197F_WDT is not set
++CONFIG_RTL8197F_WDT=y
 +# CONFIG_RTL838X is not set
 +# CONFIG_RTL839X is not set
 +# CONFIG_RTL930X is not set
