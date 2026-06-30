@@ -222,6 +222,105 @@ index 0000000000..f20ec0dc63
 ++MODULE_AUTHOR("OpenWrt A2004MU clean-room scaffold");
 ++MODULE_DESCRIPTION("RTL8197F watchdog scaffold without hardware access");
 ++MODULE_LICENSE("GPL");
+diff --git a/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
+new file mode 100644
+index 0000000000..a90db7a796
+--- /dev/null
++++ b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
+@@ -0,0 +1,93 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: A2004MU Clean-room Scaffold <noreply@example.invalid>
++Date: Tue, 30 Jun 2026 00:00:00 +0900
++Subject: [PATCH] net: ethernet: add RTL8197F Ethernet scaffold
++
++Add a clean-room RTL8197F Ethernet scaffold symbol and platform driver
++placeholder. This intentionally does not access MMIO, MDIO, IRQs, or
++register a net_device until the RTL8197F Ethernet register map and switch
++path are independently verified.
++---
++ drivers/net/ethernet/Kconfig        | 14 ++++++++++++++
++ drivers/net/ethernet/Makefile       |  1 +
++ drivers/net/ethernet/rtl8197f_eth.c | 41 +++++++++++++++++++++++++++++++++++++++++
++ 3 files changed, 56 insertions(+)
++ create mode 100644 drivers/net/ethernet/rtl8197f_eth.c
++
++--- a/drivers/net/ethernet/Kconfig
+++++ b/drivers/net/ethernet/Kconfig
++@@ -187,6 +187,20 @@ config NET_RTL838X
++ 	help
++ 	  Say Y here if you want to use the Realtek rtl838x Gbps Ethernet MAC.
++ 
+++config RTL8197F_ETH
+++	tristate "Realtek RTL8197F Ethernet scaffold"
+++	depends on MACH_REALTEK_RTL8197F || COMPILE_TEST
+++	depends on OF
+++	help
+++	  Clean-room scaffold for RTL8197F Ethernet investigation.
+++
+++	  This driver intentionally does not access MMIO, MDIO, IRQs, or
+++	  register a net_device until the RTL8197F Ethernet register map,
+++	  MDIO path, PHY/switch attachment, and port mapping are verified
+++	  from license-compatible evidence.
+++
+++	  If unsure, say N.
+++
++ source "drivers/net/ethernet/samsung/Kconfig"
++ source "drivers/net/ethernet/seeq/Kconfig"
++ source "drivers/net/ethernet/sgi/Kconfig"
++--- a/drivers/net/ethernet/Makefile
+++++ b/drivers/net/ethernet/Makefile
++@@ -84,6 +84,7 @@ obj-$(CONFIG_NET_VENDOR_RENESAS) += rene
++ obj-$(CONFIG_NET_VENDOR_RDC) += rdc/
++ obj-$(CONFIG_NET_VENDOR_ROCKER) += rocker/
++ obj-$(CONFIG_NET_RTL838X) += rtl838x_eth.o
+++obj-$(CONFIG_RTL8197F_ETH) += rtl8197f_eth.o
++ obj-$(CONFIG_NET_VENDOR_SAMSUNG) += samsung/
++ obj-$(CONFIG_NET_VENDOR_SEEQ) += seeq/
++ obj-$(CONFIG_NET_VENDOR_SILAN) += silan/
++--- /dev/null
+++++ b/drivers/net/ethernet/rtl8197f_eth.c
++@@ -0,0 +1,41 @@
+++// SPDX-License-Identifier: GPL-2.0-only
+++/*
+++ * Clean-room RTL8197F Ethernet scaffold.
+++ *
+++ * This is a placeholder to keep RTL8197F Ethernet separate from the existing
+++ * RTL838x/RTL93xx/Otto Ethernet path. It intentionally performs no MMIO,
+++ * MDIO, IRQ, DMA, PHY, switch, or net_device registration until the hardware
+++ * interface is independently verified.
+++ */
+++
+++#include <linux/errno.h>
+++#include <linux/module.h>
+++#include <linux/mod_devicetable.h>
+++#include <linux/platform_device.h>
+++
+++static int rtl8197f_eth_probe(struct platform_device *pdev)
+++{
+++	dev_warn(&pdev->dev,
+++		 "RTL8197F Ethernet scaffold disabled: register map unresolved\n");
+++
+++	return -ENODEV;
+++}
+++
+++static const struct of_device_id rtl8197f_eth_of_match[] = {
+++	{ .compatible = "realtek,rtl8197f-ethernet" },
+++	{ }
+++};
+++MODULE_DEVICE_TABLE(of, rtl8197f_eth_of_match);
+++
+++static struct platform_driver rtl8197f_eth_driver = {
+++	.probe = rtl8197f_eth_probe,
+++	driver = {
+++		.name = "rtl8197f-eth",
+++		.of_match_table = rtl8197f_eth_of_match,
+++	},
+++};
+++module_platform_driver(rtl8197f_eth_driver);
+++
+++MODULE_AUTHOR("A2004MU clean-room scaffold");
+++MODULE_DESCRIPTION("RTL8197F Ethernet scaffold without hardware access");
+++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/rtl8197f/README.md b/target/linux/realtek/rtl8197f/README.md
 new file mode 100644
 index 0000000000..e313199b1a
@@ -265,10 +364,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..f3828950d4
+index 0000000000..547fd496e8
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,66 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -317,6 +416,7 @@ index 0000000000..f3828950d4
 +# Existing OpenWrt realtek subtargets use the Realtek Otto SerDes PCS driver.
 +# No A2004MU evidence currently proves RTL8197F uses that PCS path.
 +# CONFIG_PCS_RTL_OTTO is not set
++# CONFIG_RTL8197F_ETH is not set
 +# Stock logs prove RTL8197F has GPIO, but not compatibility with the existing
 +# Realtek Otto GPIO driver. LEDs/buttons are deferred.
 +# CONFIG_GPIO_REALTEK_OTTO is not set
