@@ -224,29 +224,29 @@ index 0000000000..f20ec0dc63
 ++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
 new file mode 100644
-index 0000000000..a90db7a796
+index 0000000000..7b8ac8a692
 --- /dev/null
 +++ b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,195 @@
 +From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 +From: A2004MU Clean-room Scaffold <noreply@example.invalid>
 +Date: Tue, 30 Jun 2026 00:00:00 +0900
 +Subject: [PATCH] net: ethernet: add RTL8197F Ethernet scaffold
 +
-+Add a clean-room RTL8197F Ethernet scaffold symbol and platform driver
-+placeholder. This intentionally does not access MMIO, MDIO, IRQs, or
-+register a net_device until the RTL8197F Ethernet register map and switch
-+path are independently verified.
++Add a clean-room RTL8197F Ethernet driver scaffold symbol and platform
++netdev path. The driver can bind only when DTS supplies MMIO and IRQ
++resources, but it still avoids MDIO, DMA, TX/RX register programming, and
++switch setup until those facts are independently verified.
 +---
-+ drivers/net/ethernet/Kconfig        | 14 ++++++++++++++
++ drivers/net/ethernet/Kconfig        | 16 ++++++--
 + drivers/net/ethernet/Makefile       |  1 +
-+ drivers/net/ethernet/rtl8197f_eth.c | 41 +++++++++++++++++++++++++++++++++++++++++
-+ 3 files changed, 56 insertions(+)
++ drivers/net/ethernet/rtl8197f_eth.c | 139 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++ 3 files changed, 152 insertions(+), 4 deletions(-)
 + create mode 100644 drivers/net/ethernet/rtl8197f_eth.c
 +
 +--- a/drivers/net/ethernet/Kconfig
 ++++ b/drivers/net/ethernet/Kconfig
-+@@ -187,6 +187,20 @@ config NET_RTL838X
++@@ -187,6 +187,21 @@ config NET_RTL838X
 + 	help
 + 	  Say Y here if you want to use the Realtek rtl838x Gbps Ethernet MAC.
 + 
@@ -254,13 +254,14 @@ index 0000000000..a90db7a796
 ++	tristate "Realtek RTL8197F Ethernet scaffold"
 ++	depends on MACH_REALTEK_RTL8197F || COMPILE_TEST
 ++	depends on OF
+++	select MII
 ++	help
 ++	  Clean-room scaffold for RTL8197F Ethernet investigation.
 ++
-++	  This driver intentionally does not access MMIO, MDIO, IRQs, or
-++	  register a net_device until the RTL8197F Ethernet register map,
-++	  MDIO path, PHY/switch attachment, and port mapping are verified
-++	  from license-compatible evidence.
+++	  This driver separates RTL8197F Ethernet from the RTL838x/Otto path
+++	  and provides a minimal platform net_device skeleton. It does not
+++	  program DMA, MDIO, PHY, switch, or packet datapath registers until
+++	  those hardware facts are verified from license-compatible evidence.
 ++
 ++	  If unsure, say N.
 ++
@@ -279,28 +280,128 @@ index 0000000000..a90db7a796
 + obj-$(CONFIG_NET_VENDOR_SILAN) += silan/
 +--- /dev/null
 ++++ b/drivers/net/ethernet/rtl8197f_eth.c
-+@@ -0,0 +1,41 @@
++@@ -0,0 +1,139 @@
 ++// SPDX-License-Identifier: GPL-2.0-only
 ++/*
 ++ * Clean-room RTL8197F Ethernet scaffold.
 ++ *
-++ * This is a placeholder to keep RTL8197F Ethernet separate from the existing
-++ * RTL838x/RTL93xx/Otto Ethernet path. It intentionally performs no MMIO,
-++ * MDIO, IRQ, DMA, PHY, switch, or net_device registration until the hardware
-++ * interface is independently verified.
+++ * This driver intentionally keeps the RTL8197F path separate from the
+++ * RTL838x/RTL93xx/Otto Ethernet driver. It allocates a net_device only when
+++ * the platform supplies MMIO and IRQ resources, but it does not program DMA,
+++ * MDIO, PHY, switch, TX, or RX registers until those facts are independently
+++ * verified.
 ++ */
 ++
-++#include <linux/errno.h>
+++#include <linux/etherdevice.h>
+++#include <linux/interrupt.h>
+++#include <linux/io.h>
 ++#include <linux/module.h>
 ++#include <linux/mod_devicetable.h>
+++#include <linux/netdevice.h>
 ++#include <linux/platform_device.h>
+++
+++struct rtl8197f_eth_priv {
+++	void __iomem *base;
+++	int irq;
+++	struct net_device *ndev;
+++};
+++
+++static int rtl8197f_eth_open(struct net_device *ndev)
+++{
+++	netdev_warn(ndev,
+++		    "datapath registers unresolved; interface remains stopped\n");
+++
+++	return -EOPNOTSUPP;
+++}
+++
+++static int rtl8197f_eth_stop(struct net_device *ndev)
+++{
+++	netif_stop_queue(ndev);
+++
+++	return 0;
+++}
+++
+++static netdev_tx_t rtl8197f_eth_start_xmit(struct sk_buff *skb,
+++						   struct net_device *ndev)
+++{
+++	dev_kfree_skb(skb);
+++	netdev_warn_once(ndev,
+++			 "TX datapath unresolved; dropped scaffold packet\n");
+++
+++	return NETDEV_TX_OK;
+++}
+++
+++static const struct net_device_ops rtl8197f_eth_netdev_ops = {
+++	.ndo_open		= rtl8197f_eth_open,
+++	.ndo_stop		= rtl8197f_eth_stop,
+++	.ndo_start_xmit		= rtl8197f_eth_start_xmit,
+++	.ndo_set_mac_address	= eth_mac_addr,
+++	.ndo_validate_addr	= eth_validate_addr,
+++};
+++
+++static irqreturn_t rtl8197f_eth_irq(int irq, void *data)
+++{
+++	struct net_device *ndev = data;
+++
+++	netdev_warn_once(ndev,
+++			 "IRQ asserted before interrupt registers are implemented\n");
+++
+++	return IRQ_NONE;
+++}
 ++
 ++static int rtl8197f_eth_probe(struct platform_device *pdev)
 ++{
-++	dev_warn(&pdev->dev,
-++		 "RTL8197F Ethernet scaffold disabled: register map unresolved\n");
+++	struct rtl8197f_eth_priv *priv;
+++	struct net_device *ndev;
+++	int err;
 ++
-++	return -ENODEV;
+++	ndev = devm_alloc_etherdev(&pdev->dev, sizeof(*priv));
+++	if (!ndev)
+++		return -ENOMEM;
+++
+++	priv = netdev_priv(ndev);
+++	priv->ndev = ndev;
+++	platform_set_drvdata(pdev, ndev);
+++	SET_NETDEV_DEV(ndev, &pdev->dev);
+++
+++	priv->base = devm_platform_ioremap_resource(pdev, 0);
+++	if (IS_ERR(priv->base))
+++		return dev_err_probe(&pdev->dev, PTR_ERR(priv->base),
+++				     "missing RTL8197F Ethernet MMIO resource\n");
+++
+++	priv->irq = platform_get_irq_optional(pdev, 0);
+++	if (priv->irq == -ENXIO)
+++		return dev_err_probe(&pdev->dev, priv->irq,
+++				     "missing RTL8197F Ethernet IRQ resource\n");
+++	if (priv->irq < 0)
+++		return dev_err_probe(&pdev->dev, priv->irq,
+++				     "failed to read RTL8197F Ethernet IRQ\n");
+++
+++	err = devm_request_irq(&pdev->dev, priv->irq, rtl8197f_eth_irq, 0,
+++			       dev_name(&pdev->dev), ndev);
+++	if (err)
+++		return dev_err_probe(&pdev->dev, err,
+++				     "failed to request RTL8197F Ethernet IRQ\n");
+++
+++	ndev->netdev_ops = &rtl8197f_eth_netdev_ops;
+++	eth_hw_addr_random(ndev);
+++
+++	err = register_netdev(ndev);
+++	if (err)
+++		return dev_err_probe(&pdev->dev, err,
+++				     "failed to register RTL8197F Ethernet netdev\n");
+++
+++	netdev_warn(ndev,
+++		    "registered scaffold netdev; DMA/MDIO/switch datapath unresolved\n");
+++
+++	return 0;
+++}
+++
+++static void rtl8197f_eth_remove(struct platform_device *pdev)
+++{
+++	struct net_device *ndev = platform_get_drvdata(pdev);
+++
+++	unregister_netdev(ndev);
 ++}
 ++
 ++static const struct of_device_id rtl8197f_eth_of_match[] = {
@@ -311,7 +412,8 @@ index 0000000000..a90db7a796
 ++
 ++static struct platform_driver rtl8197f_eth_driver = {
 ++	.probe = rtl8197f_eth_probe,
-++	driver = {
+++	.remove = rtl8197f_eth_remove,
+++	.driver = {
 ++		.name = "rtl8197f-eth",
 ++		.of_match_table = rtl8197f_eth_of_match,
 ++	},
@@ -319,7 +421,7 @@ index 0000000000..a90db7a796
 ++module_platform_driver(rtl8197f_eth_driver);
 ++
 ++MODULE_AUTHOR("A2004MU clean-room scaffold");
-++MODULE_DESCRIPTION("RTL8197F Ethernet scaffold without hardware access");
+++MODULE_DESCRIPTION("RTL8197F Ethernet scaffold netdev driver");
 ++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/rtl8197f/README.md b/target/linux/realtek/rtl8197f/README.md
 new file mode 100644
@@ -364,10 +466,10 @@ index 0000000000..e313199b1a
 +* LuCI.
 diff --git a/target/linux/realtek/rtl8197f/config-6.18 b/target/linux/realtek/rtl8197f/config-6.18
 new file mode 100644
-index 0000000000..7a7582aadf
+index 0000000000..dcfa9b3ae8
 --- /dev/null
 +++ b/target/linux/realtek/rtl8197f/config-6.18
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,79 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
 +# Clean-room RTL8197F scaffold only.
@@ -416,7 +518,20 @@ index 0000000000..7a7582aadf
 +# Existing OpenWrt realtek subtargets use the Realtek Otto SerDes PCS driver.
 +# No A2004MU evidence currently proves RTL8197F uses that PCS path.
 +# CONFIG_PCS_RTL_OTTO is not set
-+# CONFIG_RTL8197F_ETH is not set
++CONFIG_RTL8197F_ETH=y
++CONFIG_MDIO_BUS=y
++CONFIG_MDIO_DEVICE=y
++CONFIG_PHYLIB=y
++CONFIG_NET_VENDOR_REALTEK=y
++CONFIG_ETHERNET=y
++CONFIG_NETDEVICES=y
++# No A2004MU evidence currently proves an RTL8214x/RTL8218x multiport PHY.
++# CONFIG_REALTEK_PHY_MULTIPORT is not set
++# CONFIG_REALTEK_PHY is not set
++# Existing Realtek RTL9300/Otto MDIO support is not proven for RTL8197F.
++# CONFIG_MDIO_REALTEK_RTL9300 is not set
++# CONFIG_MDIO_REALTEK_OTTO is not set
++# CONFIG_MDIO_REALTEK_OTTO_SERDES is not set
 +# Stock logs prove RTL8197F has GPIO, but not compatibility with the existing
 +# Realtek Otto GPIO driver. LEDs/buttons are deferred.
 +# CONFIG_GPIO_REALTEK_OTTO is not set
