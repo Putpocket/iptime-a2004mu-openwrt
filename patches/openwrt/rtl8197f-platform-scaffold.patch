@@ -13,10 +13,10 @@ index b6823f6c73..c8b0608c3f 100644
  
 diff --git a/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
 new file mode 100644
-index 0000000000..06ba9c9f34
+index 0000000000..3e45be2a5c
 --- /dev/null
 +++ b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,57 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 +
 +/dts-v1/;
@@ -50,6 +50,16 @@ index 0000000000..06ba9c9f34
 +		reg-shift = <2>;
 +		fifo-size = <1>;
 +		no-loopback-test;
++		status = "okay";
++	};
++
++	ethernet {
++		compatible = "realtek,rtl8197f-ethernet";
++		status = "okay";
++	};
++
++	watchdog {
++		compatible = "realtek,rtl8197f-watchdog";
 +		status = "okay";
 +	};
 +
