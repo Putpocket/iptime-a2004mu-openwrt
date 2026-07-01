@@ -9,7 +9,14 @@ import lzma
 import struct
 from pathlib import Path
 
-from verify_iptime_checksum import build_result, read_header
+from verify_iptime_checksum import (
+    PROTECT2_MAGIC,
+    PROTECT2_SECRET_CANDIDATE,
+    build_result,
+    protect_crc2_candidate,
+    protect_crc_candidate,
+    read_header,
+)
 
 
 FW_OFFSET = 0x40000
@@ -19,6 +26,9 @@ KDESC_OFFSET = FW_OFFSET + HEADER_LEN
 CR6B_OFFSET = KDESC_OFFSET + KDESC_LEN
 FLASH_SIZE = 0x800000
 DEFAULT_UPDATER_SKIP_OFFSET = 0x400C0
+WEB_ADMIN_BODY_OFFSET = FW_OFFSET
+WEB_ADMIN_HEADER_OFFSET = FW_OFFSET - HEADER_LEN
+WEB_ADMIN_LZMA_OFFSET = 0x27A0
 BODY_HEADER_LEN = 0x38
 BODY_KDESC_OFFSET = BODY_HEADER_LEN
 BODY_CR6B_OFFSET = BODY_HEADER_LEN + KDESC_LEN
@@ -56,6 +66,38 @@ def find_all(data: bytes, marker: bytes) -> list[int]:
             return offsets
         offsets.append(offset)
         start = offset + 1
+
+
+def checksum_status_at(path: Path, data: bytes, header_offset: int) -> str:
+    if header_offset == FW_OFFSET:
+        try:
+            header = read_header(data)
+            result, _ = build_result(path, data, hashlib.sha256(data).hexdigest(), header)
+        except ValueError as exc:
+            return f"unavailable: {exc}"
+        return "MATCH" if result["matches"]["all"] else "MISMATCH"
+    if len(data) < header_offset + HEADER_LEN:
+        return "unavailable: header range exceeds file size"
+    model_raw = data[header_offset : header_offset + 8]
+    magic = u32le(data, header_offset + 0x10)
+    protect2 = u32le(data, header_offset + 0x14)
+    check_length = u32le(data, header_offset + 0x30)
+    primary = u32le(data, header_offset + 0x34)
+    if None in (magic, protect2, check_length, primary):
+        return "unavailable: truncated header"
+    payload_start = header_offset + HEADER_LEN
+    payload_end = payload_start + check_length
+    if payload_end > len(data):
+        return "unavailable: payload range exceeds file size"
+    byte_sum = sum(data[payload_start:payload_end]) & 0xFFFFFFFF
+    primary_candidate = protect_crc_candidate(byte_sum, PROTECT2_SECRET_CANDIDATE, model_raw)
+    protect2_candidate = protect_crc2_candidate(primary_candidate, PROTECT2_SECRET_CANDIDATE, model_raw)
+    matched = (
+        magic == PROTECT2_MAGIC
+        and primary_candidate == primary
+        and protect2_candidate == protect2
+    )
+    return "MATCH" if matched else "MISMATCH"
 
 
 def checksum_status(path: Path, data: bytes) -> str:
@@ -207,7 +249,13 @@ def print_cr6b_words(data: bytes, cr6b: int, known: dict[str, int], absolute_bas
         )
 
 
-def print_file(path: Path, updater_skip_offset: int, contract_check: bool = False) -> bool:
+def print_file(
+    path: Path,
+    updater_skip_offset: int,
+    contract_check: bool = False,
+    header_offset: int = FW_OFFSET,
+    expected_lzma_offset: int | None = None,
+) -> bool:
     data = path.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     known = known_values(data)
@@ -216,7 +264,8 @@ def print_file(path: Path, updater_skip_offset: int, contract_check: bool = Fals
     print(f"size {len(data)} 0x{len(data):x}")
     print(f"sha256 {digest}")
     print(f"fits_8mb {'yes' if len(data) <= FLASH_SIZE else 'no'}")
-    print(f"checksum {checksum_status(path, data)}")
+    print(f"checksum {checksum_status_at(path, data, header_offset)}")
+    print(f"checksum_header_offset 0x{header_offset:x}")
 
     print_magic_offsets(data)
 
@@ -339,6 +388,7 @@ def print_file(path: Path, updater_skip_offset: int, contract_check: bool = Fals
         checks = {
             "loader_entry_code": looks_like_mips_code(body, 0),
             "lzma_payload_found": lzma_offset >= 0,
+            "lzma_payload_expected_offset": expected_lzma_offset is None or lzma_offset == expected_lzma_offset,
             "lzma_props_stock": details["props"] == MAGICS["lzma_alone_stock"].hex(),
             "lzma_decodes": details["ok"],
             "lzma_header_size_matches_actual": details["ok"]
@@ -375,16 +425,24 @@ def print_file(path: Path, updater_skip_offset: int, contract_check: bool = Fals
 def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze A2004MU CR6B candidate structure.")
     parser.add_argument("--updater-skip-offset", "--skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
+    parser.add_argument("--path-mode", choices=("explicit", "web-admin"), default="explicit")
     parser.add_argument("--contract-check", action="store_true")
     parser.add_argument("paths", type=Path, nargs="+")
     args = parser.parse_args()
-    updater_skip_offset = int(args.updater_skip_offset, 0)
+    if args.path_mode == "web-admin":
+        updater_skip_offset = WEB_ADMIN_BODY_OFFSET
+        header_offset = WEB_ADMIN_HEADER_OFFSET
+        expected_lzma_offset = WEB_ADMIN_LZMA_OFFSET
+    else:
+        updater_skip_offset = int(args.updater_skip_offset, 0)
+        header_offset = FW_OFFSET
+        expected_lzma_offset = None
 
     ok = True
     for path in args.paths:
         if not path.is_file():
             parser.error(f"not a file: {path}")
-        ok = print_file(path, updater_skip_offset, args.contract_check) and ok
+        ok = print_file(path, updater_skip_offset, args.contract_check, header_offset, expected_lzma_offset) and ok
     return 0 if ok else 1
 
 

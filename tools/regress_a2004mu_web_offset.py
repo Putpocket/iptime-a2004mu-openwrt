@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check whether observed ipTIME web-updater offsets are file-predictable."""
+"""Validate the A2004MU web-updater multipart-prefix offset model."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 
 FW_OFFSET = 0x40000
 HEADER_LEN = 0x38
+STOCK_LOADER_START = b"\x00\x10\x08\x21"
 
 
 @dataclass(frozen=True)
@@ -41,10 +42,14 @@ def row_for(obs: Observation) -> dict:
     data = obs.path.read_bytes()
     sha256 = hashlib.sha256(data).hexdigest()
     header = data[FW_OFFSET : FW_OFFSET + HEADER_LEN] if len(data) >= FW_OFFSET + HEADER_LEN else b""
+    body = data[FW_OFFSET:] if len(data) >= FW_OFFSET else b""
     return {
         "path": str(obs.path),
-        "observed_get_sys_params_offset": obs.offset,
-        "observed_updater_write_offset": FW_OFFSET + obs.offset,
+        "observed_multipart_prefix": obs.offset,
+        "observed_tmp_firmware_write_offset": FW_OFFSET + obs.offset,
+        "candidate_internal_body_offset": FW_OFFSET,
+        "expected_written_length": max(0, len(data) - FW_OFFSET),
+        "body_starts_with_stock_loader": body.startswith(STOCK_LOADER_START),
         "size": len(data),
         "sha256": sha256,
         "header_rootfs_offset": u32le(data, FW_OFFSET + 0x2C),
@@ -55,59 +60,19 @@ def row_for(obs: Observation) -> dict:
     }
 
 
-def find_content_conflicts(rows: list[dict]) -> list[dict]:
-    by_sha: dict[str, set[int]] = {}
-    paths: dict[str, list[str]] = {}
+def validate_multipart_model(rows: list[dict]) -> tuple[bool, list[str]]:
+    errors = []
     for row in rows:
-        by_sha.setdefault(row["sha256"], set()).add(row["observed_get_sys_params_offset"])
-        paths.setdefault(row["sha256"], []).append(row["path"])
-    conflicts = []
-    for digest, offsets in by_sha.items():
-        if len(offsets) > 1:
-            conflicts.append(
-                {
-                    "sha256": digest,
-                    "observed_offsets": sorted(offsets),
-                    "paths": paths[digest],
-                }
-            )
-    return conflicts
-
-
-def candidate_features(row: dict) -> dict[str, int]:
-    features = {
-        "size_mod256": row["size"] & 0xFF,
-        "header_sum_mod256": row["header_sum_mod256"],
-        "file_sum_mod256": row["file_sum_mod256"],
-    }
-    for key in ("header_rootfs_offset", "header_check_length", "header_primary_checksum"):
-        value = row[key]
-        if value is None:
-            continue
-        features[f"{key}_mod256"] = value & 0xFF
-        features[f"{key}_byte1"] = (value >> 8) & 0xFF
-        features[f"{key}_byte2"] = (value >> 16) & 0xFF
-        features[f"{key}_byte3"] = (value >> 24) & 0xFF
-    return features
-
-
-def find_exact_predictors(rows: list[dict]) -> list[str]:
-    if not rows:
-        return []
-    names = set(candidate_features(rows[0]))
-    for row in rows[1:]:
-        names &= set(candidate_features(row))
-
-    predictors = []
-    for name in sorted(names):
-        if all(candidate_features(row)[name] == row["observed_get_sys_params_offset"] for row in rows):
-            predictors.append(name)
-    return predictors
+        if row["observed_tmp_firmware_write_offset"] != FW_OFFSET + row["observed_multipart_prefix"]:
+            errors.append(f"write offset mismatch for {row['path']}")
+        if row["size"] <= FW_OFFSET:
+            errors.append(f"candidate too small for 0x40000 body offset: {row['path']}")
+    return not errors, errors
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Regress observed A2004MU web-admin get_sys_params offsets against candidate files."
+        description="Validate observed A2004MU web-admin get_sys_params offsets as multipart prefixes."
     )
     parser.add_argument(
         "--observed",
@@ -120,21 +85,15 @@ def main() -> int:
     args = parser.parse_args()
 
     rows = [row_for(obs) for obs in args.observed]
-    conflicts = find_content_conflicts(rows)
-    exact_predictors = [] if conflicts else find_exact_predictors(rows)
-    status = "pass" if exact_predictors else "fail"
-    reason = None
-    if conflicts:
-        reason = "same file content produced different observed offsets"
-    elif not exact_predictors:
-        reason = "no exact file-content predictor found for supplied observations"
+    model_ok, errors = validate_multipart_model(rows)
+    status = "pass" if model_ok else "fail"
+    reason = None if model_ok else "; ".join(errors)
 
     result = {
         "status": status,
         "reason": reason,
         "rows": rows,
-        "content_conflicts": conflicts,
-        "exact_predictors": exact_predictors,
+        "model": "observed offset is multipart/form-data prefix; candidate internal flash body offset is 0x40000",
     }
 
     if args.json:
@@ -146,19 +105,14 @@ def main() -> int:
         for row in rows:
             print(
                 "row "
-                f"offset=0x{row['observed_get_sys_params_offset']:02x} "
-                f"write=0x{row['observed_updater_write_offset']:x} "
+                f"multipart_prefix=0x{row['observed_multipart_prefix']:02x} "
+                f"tmp_write=0x{row['observed_tmp_firmware_write_offset']:x} "
+                f"candidate_body=0x{row['candidate_internal_body_offset']:x} "
+                f"write_length=0x{row['expected_written_length']:x} "
                 f"size=0x{row['size']:x} "
                 f"sha256={row['sha256']} "
                 f"path={row['path']}"
             )
-        for conflict in conflicts:
-            offsets = ",".join(f"0x{x:02x}" for x in conflict["observed_offsets"])
-            print(f"content_conflict sha256={conflict['sha256']} offsets={offsets}")
-            for path in conflict["paths"]:
-                print(f"content_conflict_path {path}")
-        if exact_predictors:
-            print("exact_predictors " + " ".join(exact_predictors))
 
     return 0 if status == "pass" else 1
 

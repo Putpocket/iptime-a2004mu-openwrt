@@ -23,6 +23,8 @@ from verify_iptime_checksum import (
 KDESC_LEN = 0x10
 CR6B_OFFSET = FW_OFFSET + HEADER_LEN + KDESC_LEN
 DEFAULT_UPDATER_SKIP_OFFSET = 0x400C0
+WEB_ADMIN_BODY_OFFSET = FW_OFFSET
+WEB_ADMIN_HEADER_OFFSET = FW_OFFSET - HEADER_LEN
 BODY_HEADER_OFFSET = 0
 BODY_KDESC_OFFSET = HEADER_LEN
 BODY_CR6B_OFFSET = HEADER_LEN + KDESC_LEN
@@ -88,6 +90,37 @@ def fill_iptime_header(image: bytearray, header_offset: int, check_start: int, c
     struct.pack_into("<I", image, header_offset + 0x34, primary)
     return check_end - check_start, primary, protect2
 
+
+def self_check_header_at(path: Path, image: bytes, header_offset: int) -> dict:
+    if len(image) < header_offset + HEADER_LEN:
+        return {"status": "range_error", "matches": {"all": False}, "error": "header range exceeds file size"}
+    model_raw = image[header_offset : header_offset + 8]
+    magic = struct.unpack_from("<I", image, header_offset + 0x10)[0]
+    protect2 = struct.unpack_from("<I", image, header_offset + 0x14)[0]
+    check_length = struct.unpack_from("<I", image, header_offset + 0x30)[0]
+    primary = struct.unpack_from("<I", image, header_offset + 0x34)[0]
+    payload_start = header_offset + HEADER_LEN
+    payload_end = payload_start + check_length
+    if payload_end > len(image):
+        return {"status": "range_error", "matches": {"all": False}, "error": "payload range exceeds file size"}
+
+    byte_sum = sum(image[payload_start:payload_end]) & 0xFFFFFFFF
+    primary_candidate = protect_crc_candidate(byte_sum, PROTECT2_SECRET_CANDIDATE, model_raw)
+    protect2_candidate = protect_crc2_candidate(primary_candidate, PROTECT2_SECRET_CANDIDATE, model_raw)
+    matches = {
+        "primary_checksum": primary_candidate == primary,
+        "protect2_checksum": protect2_candidate == protect2,
+        "protect2_magic": magic == PROTECT2_MAGIC,
+    }
+    matches["all"] = all(matches.values())
+    return {
+        "path": str(path),
+        "status": "match" if matches["all"] else "mismatch",
+        "header_offset": header_offset,
+        "payload_start": payload_start,
+        "payload_end": payload_end,
+        "matches": matches,
+    }
 
 
 def parse_int(value: str) -> int:
@@ -175,7 +208,8 @@ def build_stock_loader_image(
     template_data: bytes,
     openwrt_data: bytes,
     rootfs_offset_arg: str,
-    updater_skip_offset: int,
+    body_offset: int,
+    header_offset: int,
     loader_source_offset: int,
     kernel_payload_mode: str,
     lzma_props: bytes,
@@ -194,7 +228,7 @@ def build_stock_loader_image(
         raise ValueError("SquashFS marker overlaps uImage kernel")
     rootfs_blob = openwrt_data[squashfs_offset:]
 
-    if len(stock_data) < updater_skip_offset:
+    if len(stock_data) < body_offset:
         raise ValueError("stock firmware is too small for updater prefix copy")
     header, _ = read_template(template_data)
     if len(stock_data) < loader_source_offset:
@@ -221,14 +255,14 @@ def build_stock_loader_image(
         rootfs_offset = min_rootfs_offset
 
     body_size = rootfs_offset + len(rootfs_blob)
-    file_size = updater_skip_offset + body_size
+    file_size = body_offset + body_size
     if body_size > FLASH_SIZE:
         raise ValueError(f"planned flash body exceeds 8MB flash: 0x{body_size:x}")
 
-    image = bytearray(stock_data[:updater_skip_offset])
+    image = bytearray(stock_data[:body_offset])
     image.extend(b"\x00" * body_size)
 
-    body_start = updater_skip_offset
+    body_start = body_offset
     body_end = body_start + body_size
     image[body_start : body_start + len(loader_prefix)] = loader_prefix
     image[body_start + loader_end : body_start + loader_end + len(kernel_body)] = kernel_body
@@ -241,18 +275,21 @@ def build_stock_loader_image(
     if not contract_ok:
         raise ValueError(f"stock-loader LZMA contract failed: {contract.get('error', 'unknown')}")
 
-    image[FW_OFFSET : FW_OFFSET + HEADER_LEN] = header
+    if header_offset < 0 or header_offset + HEADER_LEN > body_start:
+        raise ValueError("ipTIME header must fit before the web-admin flash body")
+    image[header_offset : header_offset + HEADER_LEN] = header
     upload_check_length, upload_primary, upload_protect2 = fill_iptime_header(
         image,
-        FW_OFFSET,
-        FW_OFFSET + HEADER_LEN,
+        header_offset,
+        header_offset + HEADER_LEN,
         file_size,
         rootfs_offset,
     )
 
     report = {
         "file_size": file_size,
-        "updater_skip_offset": updater_skip_offset,
+        "flash_body_file_offset": body_offset,
+        "iptime_header_offset": header_offset,
         "stock_loader_source_offset": loader_source_offset,
         "flash_body_size": body_size,
         "variant": variant,
@@ -406,9 +443,9 @@ def main() -> int:
     parser.add_argument("--rootfs-offset", default="auto")
     parser.add_argument(
         "--path-mode",
-        choices=("explicit", "web-admin"),
+        choices=("explicit", "web-admin", "tftp"),
         default="explicit",
-        help="web-admin mode is disabled until get_sys_params offset prediction passes regression",
+        help="web-admin places the flash body at file offset 0x40000; tftp/explicit use --updater-skip-offset",
     )
     parser.add_argument("--entry-layout", choices=("stock-loader", "flash-body-cr6b"), default="stock-loader")
     parser.add_argument(
@@ -429,11 +466,6 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    if args.path_mode == "web-admin":
-        parser.error(
-            "--path-mode web-admin requires a validated get_sys_params offset predictor; "
-            "run tools/regress_a2004mu_web_offset.py first"
-        )
     updater_skip_offset = parse_int(args.updater_skip_offset)
     loader_source_offset = parse_int(args.loader_source_offset)
     lzma_props = bytes.fromhex(args.lzma_props)
@@ -449,13 +481,21 @@ def main() -> int:
     stock_data = stock.read_bytes()
     template_data = template.read_bytes()
     openwrt_data = openwrt.read_bytes()
+    if args.path_mode == "web-admin":
+        body_offset = WEB_ADMIN_BODY_OFFSET
+        header_offset = WEB_ADMIN_HEADER_OFFSET
+    else:
+        body_offset = updater_skip_offset
+        header_offset = FW_OFFSET
+
     if args.entry_layout == "stock-loader":
         image, report = build_stock_loader_image(
             stock_data,
             template_data,
             openwrt_data,
             args.rootfs_offset,
-            updater_skip_offset,
+            body_offset,
+            header_offset,
             loader_source_offset,
             args.kernel_payload_mode,
             lzma_props,
@@ -473,7 +513,10 @@ def main() -> int:
     output = args.output.expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(image)
-    self_check = self_check_output(output, image)
+    if args.path_mode == "web-admin":
+        self_check = self_check_header_at(output, image, WEB_ADMIN_HEADER_OFFSET)
+    else:
+        self_check = self_check_output(output, image)
 
     result = {
         "status": "written",
@@ -496,7 +539,10 @@ def main() -> int:
         print("WARNING: EXPERIMENTAL OUTPUT ONLY; not web-admin tested; not hardware validated")
         print(f"output: {output}")
         print(f"file size: {len(image)} bytes (0x{len(image):x})")
-        print(f"updater skip offset: 0x{report['updater_skip_offset']:x}")
+        print(f"flash body file offset: 0x{report.get('flash_body_file_offset', report.get('updater_skip_offset')):x}")
+        if "iptime_header_offset" in report:
+            print(f"ipTIME header offset: 0x{report['iptime_header_offset']:x}")
+            print(f"expected web write length: {len(image) - report['flash_body_file_offset']} bytes (0x{len(image) - report['flash_body_file_offset']:x})")
         print(f"flash body size: {report['flash_body_size']} bytes (0x{report['flash_body_size']:x})")
         print(f"sha256: {sha256_bytes(image)}")
         if "kernel_size" in report:
