@@ -94,8 +94,8 @@ def parse_int(value: str) -> int:
     return int(value, 0)
 
 
-def find_stock_loader_end(stock_data: bytes, updater_skip_offset: int) -> int:
-    body = stock_data[updater_skip_offset:]
+def find_stock_loader_end(stock_data: bytes, loader_source_offset: int) -> int:
+    body = stock_data[loader_source_offset:]
     offset = body.find(STOCK_LZMA_MAGIC)
     if offset < 0:
         raise ValueError("stock flash body LZMA marker not found")
@@ -176,6 +176,7 @@ def build_stock_loader_image(
     openwrt_data: bytes,
     rootfs_offset_arg: str,
     updater_skip_offset: int,
+    loader_source_offset: int,
     kernel_payload_mode: str,
     lzma_props: bytes,
     variant: str | None,
@@ -196,8 +197,10 @@ def build_stock_loader_image(
     if len(stock_data) < updater_skip_offset:
         raise ValueError("stock firmware is too small for updater prefix copy")
     header, _ = read_template(template_data)
-    stock_body = stock_data[updater_skip_offset:]
-    loader_end = find_stock_loader_end(stock_data, updater_skip_offset)
+    if len(stock_data) < loader_source_offset:
+        raise ValueError("stock firmware is too small for stock loader source offset")
+    stock_body = stock_data[loader_source_offset:]
+    loader_end = find_stock_loader_end(stock_data, loader_source_offset)
     loader_prefix = stock_body[:loader_end]
 
     requested_rootfs_offset = None
@@ -250,6 +253,7 @@ def build_stock_loader_image(
     report = {
         "file_size": file_size,
         "updater_skip_offset": updater_skip_offset,
+        "stock_loader_source_offset": loader_source_offset,
         "flash_body_size": body_size,
         "variant": variant,
         "entry_layout": "stock-loader-raw-lzma",
@@ -401,8 +405,15 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rootfs-offset", default="auto")
     parser.add_argument("--entry-layout", choices=("stock-loader", "flash-body-cr6b"), default="stock-loader")
-    parser.add_argument("--updater-skip-offset", "--skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
+    parser.add_argument(
+        "--updater-skip-offset",
+        "--skip-offset",
+        "--force-updater-skip",
+        default=hex(DEFAULT_UPDATER_SKIP_OFFSET),
+        help="file offset that the web updater is expected to skip before writing the flash body",
+    )
     parser.add_argument("--variant")
+    parser.add_argument("--loader-source-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
     parser.add_argument("--lzma-props", default=STOCK_LZMA_MAGIC.hex())
     parser.add_argument(
         "--kernel-payload-mode",
@@ -413,6 +424,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     updater_skip_offset = parse_int(args.updater_skip_offset)
+    loader_source_offset = parse_int(args.loader_source_offset)
     lzma_props = bytes.fromhex(args.lzma_props)
 
     repo = Path.cwd()
@@ -433,6 +445,7 @@ def main() -> int:
             openwrt_data,
             args.rootfs_offset,
             updater_skip_offset,
+            loader_source_offset,
             args.kernel_payload_mode,
             lzma_props,
             args.variant,
