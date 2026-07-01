@@ -30,6 +30,10 @@ WEB_ADMIN_BODY_OFFSET = FW_OFFSET
 WEB_ADMIN_HEADER_OFFSET = FW_OFFSET
 WEB_ADMIN_LOADER_CODE_OFFSET = 0xC0
 WEB_ADMIN_LZMA_OFFSET = 0x2860
+WEB_ADMIN_ROOTFS_OFFSET = 0x280000
+SYSPARAM_MAGIC_OFFSET = 0x1FC00
+SYSPARAM_PRODUCT_OFFSET = 0x1FC08
+SYSPARAM_MAGIC = b"BTMAGIN\x00"
 BODY_HEADER_LEN = 0x38
 BODY_KDESC_OFFSET = BODY_HEADER_LEN
 BODY_CR6B_OFFSET = BODY_HEADER_LEN + KDESC_LEN
@@ -114,6 +118,12 @@ def product_field(data: bytes, header_offset: int) -> str:
     if header_offset + 8 > len(data):
         return ""
     return data[header_offset : header_offset + 8].split(b"\x00", 1)[0].decode("ascii", errors="replace")
+
+
+def bytes_used_squashfs(data: bytes, offset: int) -> int | None:
+    if offset < 0 or offset + 0x30 > len(data):
+        return None
+    return struct.unpack_from("<Q", data, offset + 0x28)[0]
 
 
 def known_values(data: bytes, base_offset: int = 0) -> dict[str, int]:
@@ -273,6 +283,12 @@ def print_file(
     print(f"fits_8mb {'yes' if len(data) <= FLASH_SIZE else 'no'}")
     print(f"checksum {checksum_status_at(path, data, header_offset)}")
     print(f"checksum_header_offset 0x{header_offset:x}")
+    sys_magic = data[SYSPARAM_MAGIC_OFFSET:SYSPARAM_MAGIC_OFFSET + 8]
+    sys_product = product_field(data, SYSPARAM_PRODUCT_OFFSET)
+    print(f"sysparam_magic {sys_magic!r}")
+    print(f"sysparam_magic_check {'PASS' if sys_magic == SYSPARAM_MAGIC else 'FAIL'}")
+    print(f"sysparam_product {sys_product!r}")
+    print(f"sysparam_product_check {'PASS' if sys_product == 'a2004m' else 'FAIL'}")
     product = product_field(data, header_offset)
     print(f"web_header_product {product!r}")
     print(f"web_header_product_check {'PASS' if product == 'a2004m' else 'FAIL'}")
@@ -386,6 +402,8 @@ def print_file(
         if offset >= 0
     ]
     body_rootfs = body.find(MAGICS["hsqs"])
+    if body_rootfs >= 0:
+        print(f"flash_body_squashfs_bytes_used 0x{bytes_used_squashfs(body, body_rootfs):x}")
     for offset in sorted(set(lzma_offsets)):
         print(
             "flash_body_lzma "
@@ -400,6 +418,8 @@ def print_file(
         compressed_size = details["consumed"] if details["ok"] else None
         checks = {
             "web_header_product": product == "a2004m",
+            "sysparam_magic": sys_magic == SYSPARAM_MAGIC,
+            "sysparam_product": sys_product == "a2004m",
             "loader_entry_code": looks_like_mips_code(body, stock_loader_code_offset),
             "lzma_payload_found": lzma_offset >= 0,
             "lzma_payload_expected_offset": expected_lzma_offset is None or lzma_offset == expected_lzma_offset,
@@ -411,6 +431,7 @@ def print_file(
             and body_rootfs >= 0
             and lzma_offset + details["consumed"] <= body_rootfs,
             "squashfs_found": body_rootfs >= 0,
+            "squashfs_expected_offset": expected_lzma_offset is None or body_rootfs == WEB_ADMIN_ROOTFS_OFFSET,
         }
         contract_pass = all(checks.values())
         print(f"contract_status {'PASS' if contract_pass else 'FAIL'}")
