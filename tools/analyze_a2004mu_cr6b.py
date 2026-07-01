@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import lzma
 import struct
 from pathlib import Path
 
@@ -17,7 +18,7 @@ KDESC_LEN = 0x10
 KDESC_OFFSET = FW_OFFSET + HEADER_LEN
 CR6B_OFFSET = KDESC_OFFSET + KDESC_LEN
 FLASH_SIZE = 0x800000
-UPDATER_SKIP_OFFSET = 0x400C2
+DEFAULT_UPDATER_SKIP_OFFSET = 0x400C0
 BODY_HEADER_LEN = 0x38
 BODY_KDESC_OFFSET = BODY_HEADER_LEN
 BODY_CR6B_OFFSET = BODY_HEADER_LEN + KDESC_LEN
@@ -111,6 +112,24 @@ def looks_like_mips_code(data: bytes, offset: int = 0) -> bool:
     return any(op in {0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0f, 0x23, 0x2b} for op in opcodes)
 
 
+def lzma_status(data: bytes, offset: int, end: int | None = None) -> str:
+    if offset < 0:
+        return "unavailable"
+    payload = data[offset:end] if end is not None and end > offset else data[offset:]
+    props = payload[:5].hex() if len(payload) >= 5 else payload.hex()
+    try:
+        decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_ALONE)
+        out = decompressor.decompress(payload)
+    except lzma.LZMAError as exc:
+        return f"FAIL props={props} error={exc}"
+    consumed = len(payload) - len(decompressor.unused_data)
+    eof = "yes" if decompressor.eof else "no"
+    return (
+        f"OK props={props} uncompressed_size=0x{len(out):x} "
+        f"consumed=0x{consumed:x} unused=0x{len(decompressor.unused_data):x} eof={eof}"
+    )
+
+
 def print_hexdump_line(label: str, data: bytes, offset: int, length: int = 64) -> None:
     if offset >= len(data):
         print(f"{label} 0x{offset:x} unavailable")
@@ -142,7 +161,7 @@ def print_cr6b_words(data: bytes, cr6b: int, known: dict[str, int], absolute_bas
         )
 
 
-def print_file(path: Path) -> None:
+def print_file(path: Path, updater_skip_offset: int) -> None:
     data = path.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     known = known_values(data)
@@ -175,14 +194,14 @@ def print_file(path: Path) -> None:
         print_cr6b_words(data, cr6b, known)
 
     print("flash_body_analysis")
-    print(f"updater_skip_offset 0x{UPDATER_SKIP_OFFSET:x}")
-    if len(data) <= UPDATER_SKIP_OFFSET:
+    print(f"updater_skip_offset 0x{updater_skip_offset:x}")
+    if len(data) <= updater_skip_offset:
         print("flash_body unavailable: file smaller than updater skip offset")
         print()
         return
 
-    body = data[UPDATER_SKIP_OFFSET:]
-    body_known = known_values(body, UPDATER_SKIP_OFFSET)
+    body = data[updater_skip_offset:]
+    body_known = known_values(body, updater_skip_offset)
     print(f"upload_file_size {len(data)} 0x{len(data):x}")
     print(f"flash_body_size {len(body)} 0x{len(body):x}")
     print(f"flash_body_fits_8mb {'yes' if len(body) <= FLASH_SIZE else 'no'}")
@@ -212,13 +231,18 @@ def print_file(path: Path) -> None:
         and body_squashfs_probe >= 0
         and body_squashfs_probe % 0x10000 == 0
     )
+    stock_lzma_offset = body_lzma_stock if body_lzma_stock >= 0 else body_lzma_openwrt
+    stock_loader_lzma_ok = stock_lzma_offset >= 0 and lzma_status(
+        body,
+        stock_lzma_offset,
+        body_squashfs_probe if body_squashfs_probe >= 0 else None,
+    ).startswith("OK ")
     stock_loader_structure_pass = (
         looks_like_mips_code(body, 0)
         and body_kdesc_probe != 0
         and body_cr6b_probe != 0
-        and (body_lzma_openwrt >= 0 or body_lzma_stock >= 0)
+        and stock_loader_lzma_ok
         and body_squashfs_probe >= 0
-        and body_squashfs_probe % 0x10000 == 0
     )
     if cr6b_structure_pass:
         print("flash_body_structure PASS cr6b-body")
@@ -238,28 +262,43 @@ def print_file(path: Path) -> None:
             actual_sum = sum(body[body_cr6b : body_cr6b + length]) & 0xFFFFFFFF
         print(
             "flash_body_kernel_descriptor "
-            f"body_offset=0x{body_kdesc:x} file_offset=0x{UPDATER_SKIP_OFFSET + body_kdesc:x} "
+            f"body_offset=0x{body_kdesc:x} file_offset=0x{updater_skip_offset + body_kdesc:x} "
             f"marker={marker!r} length=0x{length:x} checksum=0x{checksum:08x} "
             f"actual_sum={('0x%08x' % actual_sum) if actual_sum is not None else 'n/a'}"
         )
 
     body_cr6b = body.find(MAGICS["cr6b"])
     if body_cr6b >= 0:
-        print(f"flash_body_cr6b body_offset=0x{body_cr6b:x} file_offset=0x{UPDATER_SKIP_OFFSET + body_cr6b:x}")
-        print_cr6b_words(body, body_cr6b, body_known, UPDATER_SKIP_OFFSET)
+        print(f"flash_body_cr6b body_offset=0x{body_cr6b:x} file_offset=0x{updater_skip_offset + body_cr6b:x}")
+        print_cr6b_words(body, body_cr6b, body_known, updater_skip_offset)
+
+    lzma_offsets = [
+        offset
+        for offset in (body_lzma_stock, body_lzma_openwrt)
+        if offset >= 0
+    ]
+    body_rootfs = body.find(MAGICS["hsqs"])
+    for offset in sorted(set(lzma_offsets)):
+        print(
+            "flash_body_lzma "
+            f"body_offset=0x{offset:x} file_offset=0x{updater_skip_offset + offset:x} "
+            f"{lzma_status(body, offset, body_rootfs if body_rootfs >= 0 else None)}"
+        )
 
     print()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze A2004MU CR6B candidate structure.")
+    parser.add_argument("--updater-skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
     parser.add_argument("paths", type=Path, nargs="+")
     args = parser.parse_args()
+    updater_skip_offset = int(args.updater_skip_offset, 0)
 
     for path in args.paths:
         if not path.is_file():
             parser.error(f"not a file: {path}")
-        print_file(path)
+        print_file(path, updater_skip_offset)
     return 0
 
 

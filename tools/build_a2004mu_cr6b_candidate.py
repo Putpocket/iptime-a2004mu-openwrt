@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import lzma
 import struct
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from verify_iptime_checksum import (
 
 KDESC_LEN = 0x10
 CR6B_OFFSET = FW_OFFSET + HEADER_LEN + KDESC_LEN
-UPDATER_SKIP_OFFSET = 0x400C2
+DEFAULT_UPDATER_SKIP_OFFSET = 0x400C0
 BODY_HEADER_OFFSET = 0
 BODY_KDESC_OFFSET = HEADER_LEN
 BODY_CR6B_OFFSET = HEADER_LEN + KDESC_LEN
@@ -29,6 +30,13 @@ UIMAGE_MAGIC = b"\x27\x05\x19\x56"
 SQUASHFS_MAGIC = b"hsqs"
 KERNEL_MARKER = b"kernel\x00\x00"
 STOCK_LZMA_MAGIC = b"\x5d\x00\x00\x80\x00"
+STOCK_LZMA_FILTER = {
+    "id": lzma.FILTER_LZMA1,
+    "dict_size": 0x800000,
+    "lc": 3,
+    "lp": 0,
+    "pb": 2,
+}
 
 
 def align_up(value: int, alignment: int) -> int:
@@ -89,12 +97,27 @@ def fill_iptime_header(image: bytearray, header_offset: int, check_start: int, c
 
 
 
-def find_stock_loader_end(stock_data: bytes) -> int:
-    body = stock_data[UPDATER_SKIP_OFFSET:]
+def parse_int(value: str) -> int:
+    return int(value, 0)
+
+
+def find_stock_loader_end(stock_data: bytes, updater_skip_offset: int) -> int:
+    body = stock_data[updater_skip_offset:]
     offset = body.find(STOCK_LZMA_MAGIC)
     if offset < 0:
         raise ValueError("stock flash body LZMA marker not found")
     return offset
+
+
+def make_stock_compatible_lzma(kernel_body: bytes) -> tuple[bytes, int]:
+    try:
+        raw_kernel = lzma.decompress(kernel_body, format=lzma.FORMAT_ALONE)
+    except lzma.LZMAError as exc:
+        raise ValueError(f"OpenWrt uImage payload is not LZMA-alone decodable: {exc}") from exc
+    repacked = lzma.compress(raw_kernel, format=lzma.FORMAT_ALONE, filters=[STOCK_LZMA_FILTER])
+    if not repacked.startswith(STOCK_LZMA_MAGIC):
+        raise ValueError("repacked kernel does not use stock-compatible LZMA properties")
+    return repacked, len(raw_kernel)
 
 
 def build_stock_loader_image(
@@ -102,18 +125,27 @@ def build_stock_loader_image(
     template_data: bytes,
     openwrt_data: bytes,
     rootfs_offset_arg: str,
+    updater_skip_offset: int,
+    kernel_payload_mode: str,
 ) -> tuple[bytes, dict]:
     kernel_body, uimage_offset, uimage_kernel_end = read_uimage_kernel(openwrt_data)
+    original_kernel_body = kernel_body
+    uncompressed_kernel_size = None
+    if kernel_payload_mode == "stock-lzma":
+        kernel_body, uncompressed_kernel_size = make_stock_compatible_lzma(kernel_body)
+    elif kernel_payload_mode != "uimage-lzma":
+        raise ValueError(f"unknown kernel payload mode: {kernel_payload_mode}")
+
     squashfs_offset = find_required(openwrt_data, SQUASHFS_MAGIC, "SquashFS")
     if squashfs_offset < uimage_kernel_end:
         raise ValueError("SquashFS marker overlaps uImage kernel")
     rootfs_blob = openwrt_data[squashfs_offset:]
 
-    if len(stock_data) < UPDATER_SKIP_OFFSET:
+    if len(stock_data) < updater_skip_offset:
         raise ValueError("stock firmware is too small for updater prefix copy")
     header, _ = read_template(template_data)
-    stock_body = stock_data[UPDATER_SKIP_OFFSET:]
-    loader_end = find_stock_loader_end(stock_data)
+    stock_body = stock_data[updater_skip_offset:]
+    loader_end = find_stock_loader_end(stock_data, updater_skip_offset)
     loader_prefix = stock_body[:loader_end]
 
     requested_rootfs_offset = None
@@ -124,7 +156,7 @@ def build_stock_loader_image(
         rootfs_offset = int(rootfs_offset_arg, 0)
         requested_rootfs_offset = rootfs_offset
 
-    min_rootfs_offset = align_up(len(loader_prefix) + len(kernel_body), 0x10000)
+    min_rootfs_offset = len(loader_prefix) + len(kernel_body)
     if rootfs_offset < min_rootfs_offset:
         if requested_rootfs_offset is not None:
             raise ValueError(
@@ -134,14 +166,14 @@ def build_stock_loader_image(
         rootfs_offset = min_rootfs_offset
 
     body_size = rootfs_offset + len(rootfs_blob)
-    file_size = UPDATER_SKIP_OFFSET + body_size
+    file_size = updater_skip_offset + body_size
     if body_size > FLASH_SIZE:
         raise ValueError(f"planned flash body exceeds 8MB flash: 0x{body_size:x}")
 
-    image = bytearray(stock_data[:UPDATER_SKIP_OFFSET])
+    image = bytearray(stock_data[:updater_skip_offset])
     image.extend(b"\x00" * body_size)
 
-    body_start = UPDATER_SKIP_OFFSET
+    body_start = updater_skip_offset
     body_end = body_start + body_size
     image[body_start : body_start + len(loader_prefix)] = loader_prefix
     image[body_start + loader_end : body_start + loader_end + len(kernel_body)] = kernel_body
@@ -158,11 +190,15 @@ def build_stock_loader_image(
 
     report = {
         "file_size": file_size,
-        "updater_skip_offset": UPDATER_SKIP_OFFSET,
+        "updater_skip_offset": updater_skip_offset,
         "flash_body_size": body_size,
         "entry_layout": "stock-loader-raw-lzma",
+        "kernel_payload_mode": kernel_payload_mode,
         "stock_loader_size": len(loader_prefix),
+        "original_uimage_payload_size": len(original_kernel_body),
         "raw_kernel_payload_size": len(kernel_body),
+        "uncompressed_kernel_size": uncompressed_kernel_size,
+        "lzma_properties": kernel_body[:5].hex(),
         "rootfs_size": len(rootfs_blob),
         "rootfs_offset": rootfs_offset,
         "requested_rootfs_offset": requested_rootfs_offset,
@@ -187,6 +223,7 @@ def build_image(
     template_data: bytes,
     openwrt_data: bytes,
     rootfs_offset_arg: str,
+    updater_skip_offset: int,
 ) -> tuple[bytes, dict]:
     kernel_body, uimage_offset, uimage_kernel_end = read_uimage_kernel(openwrt_data)
     squashfs_offset = find_required(openwrt_data, SQUASHFS_MAGIC, "SquashFS")
@@ -216,18 +253,18 @@ def build_image(
         rootfs_offset = min_rootfs_offset
 
     body_size = rootfs_offset + len(rootfs_blob)
-    file_size = UPDATER_SKIP_OFFSET + body_size
+    file_size = updater_skip_offset + body_size
     if body_size > FLASH_SIZE:
         raise ValueError(f"planned flash body exceeds 8MB flash: 0x{body_size:x}")
-    if file_size <= UPDATER_SKIP_OFFSET:
+    if file_size <= updater_skip_offset:
         raise ValueError("planned output has empty flash body")
-    if len(stock_data) < UPDATER_SKIP_OFFSET:
+    if len(stock_data) < updater_skip_offset:
         raise ValueError("stock firmware is too small for updater prefix copy")
 
-    image = bytearray(stock_data[:UPDATER_SKIP_OFFSET])
+    image = bytearray(stock_data[:updater_skip_offset])
     image.extend(b"\x00" * body_size)
 
-    body_start = UPDATER_SKIP_OFFSET
+    body_start = updater_skip_offset
     body_end = body_start + body_size
     body_header_offset = body_start + BODY_HEADER_OFFSET
     body_kdesc_offset = body_start + BODY_KDESC_OFFSET
@@ -266,7 +303,7 @@ def build_image(
 
     report = {
         "file_size": file_size,
-        "updater_skip_offset": UPDATER_SKIP_OFFSET,
+        "updater_skip_offset": updater_skip_offset,
         "flash_body_size": body_size,
         "kernel_size": len(kernel_blob),
         "kernel_sum": kernel_sum,
@@ -302,8 +339,16 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rootfs-offset", default="auto")
     parser.add_argument("--entry-layout", choices=("stock-loader", "flash-body-cr6b"), default="stock-loader")
+    parser.add_argument("--updater-skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
+    parser.add_argument(
+        "--kernel-payload-mode",
+        choices=("stock-lzma", "uimage-lzma"),
+        default="stock-lzma",
+        help="stock-lzma recompresses the OpenWrt kernel with stock-compatible LZMA properties",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    updater_skip_offset = parse_int(args.updater_skip_offset)
 
     repo = Path.cwd()
     if not output_outside_repo(args.output, repo):
@@ -322,6 +367,8 @@ def main() -> int:
             template_data,
             openwrt_data,
             args.rootfs_offset,
+            updater_skip_offset,
+            args.kernel_payload_mode,
         )
     else:
         image, report = build_image(
@@ -329,6 +376,7 @@ def main() -> int:
             template_data,
             openwrt_data,
             args.rootfs_offset,
+            updater_skip_offset,
         )
 
     output = args.output.expanduser()
@@ -364,6 +412,13 @@ def main() -> int:
             print(f"kernel size: {report['kernel_size']} bytes (0x{report['kernel_size']:x})")
         if "stock_loader_size" in report:
             print(f"stock loader size: {report['stock_loader_size']} bytes (0x{report['stock_loader_size']:x})")
+            print(f"kernel payload mode: {report['kernel_payload_mode']}")
+            if report.get("uncompressed_kernel_size") is not None:
+                print(
+                    "uncompressed kernel size: "
+                    f"{report['uncompressed_kernel_size']} bytes (0x{report['uncompressed_kernel_size']:x})"
+                )
+            print(f"LZMA properties: {report['lzma_properties']}")
             print(f"raw kernel payload size: {report['raw_kernel_payload_size']} bytes (0x{report['raw_kernel_payload_size']:x})")
         print(f"rootfs size: {report['rootfs_size']} bytes (0x{report['rootfs_size']:x})")
         print(f"rootfs offset: 0x{report['rootfs_offset']:x}")
