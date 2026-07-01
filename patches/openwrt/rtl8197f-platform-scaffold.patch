@@ -224,10 +224,10 @@ index 0000000000..f20ec0dc63
 ++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
 new file mode 100644
-index 0000000000..21737407e1
+index 0000000000..154d03efd4
 --- /dev/null
 +++ b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
-@@ -0,0 +1,391 @@
+@@ -0,0 +1,395 @@
 +From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 +From: A2004MU Clean-room Scaffold <noreply@example.invalid>
 +Date: Tue, 30 Jun 2026 00:00:00 +0900
@@ -559,18 +559,22 @@ index 0000000000..21737407e1
 ++				     "missing RTL8197F Ethernet MMIO resource\n");
 ++
 ++	priv->irq = platform_get_irq_optional(pdev, 0);
-++	if (priv->irq == -ENXIO)
-++		return dev_err_probe(&pdev->dev, priv->irq,
-++				     "missing RTL8197F Ethernet IRQ resource\n");
-++	if (priv->irq < 0)
+++	if (priv->irq == -ENXIO) {
+++		dev_warn(&pdev->dev,
+++			 "missing RTL8197F Ethernet IRQ resource; IRQ path disabled\n");
+++		priv->irq = 0;
+++	} else if (priv->irq < 0) {
 ++		return dev_err_probe(&pdev->dev, priv->irq,
 ++				     "failed to read RTL8197F Ethernet IRQ\n");
+++	}
 ++
-++	err = devm_request_irq(&pdev->dev, priv->irq, rtl8197f_eth_irq, 0,
-++			       dev_name(&pdev->dev), ndev);
-++	if (err)
-++		return dev_err_probe(&pdev->dev, err,
-++				     "failed to request RTL8197F Ethernet IRQ\n");
+++	if (priv->irq > 0) {
+++		err = devm_request_irq(&pdev->dev, priv->irq, rtl8197f_eth_irq, 0,
+++				       dev_name(&pdev->dev), ndev);
+++		if (err)
+++			return dev_err_probe(&pdev->dev, err,
+++					     "failed to request RTL8197F Ethernet IRQ\n");
+++	}
 ++
 ++	ndev->netdev_ops = &rtl8197f_eth_netdev_ops;
 ++	netif_napi_add_weight(ndev, &priv->napi, rtl8197f_eth_poll, 64);
