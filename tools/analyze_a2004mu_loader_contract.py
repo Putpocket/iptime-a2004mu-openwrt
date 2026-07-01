@@ -19,6 +19,8 @@ HEADER_LEN = 0x38
 KDESC_OFFSET = FW_OFFSET + HEADER_LEN
 CR6B_OFFSET = KDESC_OFFSET + 0x10
 STOCK_LOAD_ADDR = 0x80A00000
+PROTECT2_MAGIC = 0x9A8F998B
+PROTECT2_SECRET_CANDIDATE = 0x128A8392
 SQUASHFS_MAGIC = b"hsqs"
 LZMA_PROPS = b"\x5d\x00\x00\x80\x00"
 
@@ -33,6 +35,28 @@ def u32le(data: bytes, off: int) -> int:
 
 def u32be(data: bytes, off: int) -> int:
     return struct.unpack_from(">I", data, off)[0]
+
+
+def c_string(data: bytes) -> bytes:
+    return data.split(b"\x00", 1)[0]
+
+
+def u32(value: int) -> int:
+    return value & 0xFFFFFFFF
+
+
+def protect_crc_candidate(base_sum: int, secret: int, model_raw: bytes) -> int:
+    model_len = len(c_string(model_raw))
+    return u32(u32(model_len * secret) + u32(~base_sum)) ^ base_sum
+
+
+def protect_crc2_candidate(base_sum: int, secret: int, model_raw: bytes) -> int:
+    model = c_string(model_raw)
+    model_len = len(model)
+    value = protect_crc_candidate(base_sum, secret, model_raw)
+    for byte in model:
+        value = u32(value + byte * model_len)
+    return value
 
 
 def decode_lzma(data: bytes, off: int, limit: int | None = None) -> dict:
@@ -55,6 +79,8 @@ def decode_lzma(data: bytes, off: int, limit: int | None = None) -> dict:
     result["decompressed"] = raw
     result["actual_uncompressed_size"] = len(raw)
     result["consumed"] = len(payload) - len(dec.unused_data)
+    result["unused_len"] = len(dec.unused_data)
+    result["unused_prefix"] = dec.unused_data[:32].hex(" ")
     result["eof"] = dec.eof
     return result
 
@@ -121,7 +147,12 @@ def analyze_file(path: Path, name: str) -> dict:
         "lzma_file_offset": LZMA_OFFSET,
         "lzma_body_offset": BODY_LZMA_OFFSET,
         "header_lzma_size_field": u32le(data, FW_OFFSET + 0x40),
+        "cr6b_body_size_field": u32be(data, FW_OFFSET + 0x54),
         "header_lzma_size_minus_consumed": None,
+        "cr6b_body_size_minus_consumed": None,
+        "lzma_stream_limit": rootfs,
+        "lzma_stream_padding_len_to_rootfs": None,
+        "lzma_stream_padding_prefix": "",
         "lzma": {k: v for k, v in lz.items() if k != "decompressed"},
         "decompressed_first_nonzero": first_nonzero(raw) if raw else None,
         "decompressed_first_0x100": raw[:0x100].hex(" ") if raw else "",
@@ -134,6 +165,11 @@ def analyze_file(path: Path, name: str) -> dict:
     }
     if lz.get("decode_ok"):
         result["header_lzma_size_minus_consumed"] = result["header_lzma_size_field"] - lz["consumed"]
+        result["cr6b_body_size_minus_consumed"] = result["cr6b_body_size_field"] - lz["consumed"]
+        result["lzma_stream_padding_len_to_rootfs"] = rootfs - (LZMA_OFFSET + lz["consumed"]) if rootfs >= 0 else None
+        if rootfs >= 0:
+            pad_start = LZMA_OFFSET + lz["consumed"]
+            result["lzma_stream_padding_prefix"] = data[pad_start:pad_start + 32].hex(" ")
     result["classes"] = classify(name, data, lz)
     return result
 
@@ -165,6 +201,16 @@ def recompress_stock(stock: Path, output: Path) -> dict:
     checksum = sum(data[CR6B_OFFSET:CR6B_OFFSET + descriptor_len]) & 0xFFFFFFFF
     struct.pack_into("<I", data, FW_OFFSET + 0x44, checksum)
 
+    payload_start = FW_OFFSET + HEADER_LEN
+    check_length = u32le(data, FW_OFFSET + 0x30)
+    payload_end = payload_start + check_length
+    byte_sum = sum(data[payload_start:payload_end]) & 0xFFFFFFFF
+    primary = protect_crc_candidate(byte_sum, PROTECT2_SECRET_CANDIDATE, data[FW_OFFSET:FW_OFFSET + 8])
+    protect2 = protect_crc2_candidate(primary, PROTECT2_SECRET_CANDIDATE, data[FW_OFFSET:FW_OFFSET + 8])
+    struct.pack_into("<I", data, FW_OFFSET + 0x10, PROTECT2_MAGIC)
+    struct.pack_into("<I", data, FW_OFFSET + 0x14, protect2)
+    struct.pack_into("<I", data, FW_OFFSET + 0x34, primary)
+
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(data)
     verify = decode_lzma(data, LZMA_OFFSET, ROOTFS_OFFSET)
@@ -176,7 +222,9 @@ def recompress_stock(stock: Path, output: Path) -> dict:
         "decompressed_sha256_matches_stock": sha256_bytes(verify["decompressed"]) == sha256_bytes(raw),
         "python_lzma_decode": "PASS" if verify.get("decode_ok") else "FAIL",
         "kernel_checksum_field": f"0x{checksum:08x}",
-        "total_checksum": "CHECKSUM_UNKNOWN",
+        "total_checksum_field": f"0x{primary:08x}",
+        "protect2_checksum_field": f"0x{protect2:08x}",
+        "total_checksum": "PATCHED_WITH_OBSERVED_ALGORITHM",
     }
 
 
