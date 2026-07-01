@@ -13,10 +13,10 @@ index b6823f6c73..c8b0608c3f 100644
  
 diff --git a/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
 new file mode 100644
-index 0000000000..b0e68b7be2
+index 0000000000..06ba9c9f34
 --- /dev/null
 +++ b/target/linux/realtek/dts/rtl8197f_iptime_a2004mu.dts
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,47 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 +
 +/dts-v1/;
@@ -28,6 +28,10 @@ index 0000000000..b0e68b7be2
 +	model = "ipTIME A2004MU";
 +	compatible = "iptime,a2004mu", "realtek,rtl8197f-soc";
 +
++	aliases {
++		serial0 = &uart0;
++	};
++
 +	memory@0 {
 +		device_type = "memory";
 +		reg = <0x00000000 0x04000000>;
@@ -35,6 +39,18 @@ index 0000000000..b0e68b7be2
 +
 +	chosen {
 +		bootargs = "console=ttyS0,38400 rootfstype=squashfs,jffs2";
++		stdout-path = "serial0:38400n8";
++	};
++
++	uart0: serial@18147000 {
++		compatible = "ns16550a";
++		reg = <0x18147000 0x100>;
++		clock-frequency = <25000000>;
++		reg-io-width = <1>;
++		reg-shift = <2>;
++		fifo-size = <1>;
++		no-loopback-test;
++		status = "okay";
 +	};
 +
 +	/*
@@ -142,10 +158,10 @@ index 0000000000..c4b0fe3375
 + source "arch/mips/ath79/Kconfig"
 diff --git a/target/linux/realtek/patches-6.18/302-watchdog-add-rtl8197f-watchdog-scaffold.patch b/target/linux/realtek/patches-6.18/302-watchdog-add-rtl8197f-watchdog-scaffold.patch
 new file mode 100644
-index 0000000000..f20ec0dc63
+index 0000000000..8cc5ef6fc3
 --- /dev/null
 +++ b/target/linux/realtek/patches-6.18/302-watchdog-add-rtl8197f-watchdog-scaffold.patch
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,77 @@
 +--- a/drivers/watchdog/Kconfig
 ++++ b/drivers/watchdog/Kconfig
 +@@ -1088,6 +1088,20 @@ config REALTEK_OTTO_WDT
@@ -181,7 +197,7 @@ index 0000000000..f20ec0dc63
 + 
 +--- /dev/null
 ++++ b/drivers/watchdog/rtl8197f_wdt.c
-+@@ -0,0 +1,40 @@
++@@ -0,0 +1,41 @@
 ++// SPDX-License-Identifier: GPL-2.0-only
 ++/*
 ++ * Clean-room RTL8197F watchdog scaffold.
@@ -198,8 +214,9 @@ index 0000000000..f20ec0dc63
 ++
 ++static int rtl8197f_wdt_probe(struct platform_device *pdev)
 ++{
+++	dev_info(&pdev->dev, "rtl8197f-wdt: probe start\n");
 ++	dev_warn(&pdev->dev,
-++		 "RTL8197F watchdog scaffold disabled: register map unresolved\n");
+++		 "rtl8197f-wdt: MMIO/register map unresolved; watchdog not registered, no fake pet\n");
 ++
 ++	return -ENODEV;
 ++}
@@ -224,10 +241,10 @@ index 0000000000..f20ec0dc63
 ++MODULE_LICENSE("GPL");
 diff --git a/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
 new file mode 100644
-index 0000000000..f18c4ff75b
+index 0000000000..91a5039054
 --- /dev/null
 +++ b/target/linux/realtek/patches-6.18/717-net-add-rtl8197f-ethernet-scaffold.patch
-@@ -0,0 +1,397 @@
+@@ -0,0 +1,399 @@
 +From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 +From: A2004MU Clean-room Scaffold <noreply@example.invalid>
 +Date: Tue, 30 Jun 2026 00:00:00 +0900
@@ -240,8 +257,8 @@ index 0000000000..f18c4ff75b
 +---
 + drivers/net/ethernet/Kconfig        | 16 ++++++--
 + drivers/net/ethernet/Makefile       |  1 +
-+ drivers/net/ethernet/rtl8197f_eth.c | 340 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-+ 3 files changed, 357 insertions(+), 4 deletions(-)
++ drivers/net/ethernet/rtl8197f_eth.c | 346 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++ 3 files changed, 362 insertions(+), 0 deletions(-)
 + create mode 100644 drivers/net/ethernet/rtl8197f_eth.c
 +
 +--- a/drivers/net/ethernet/Kconfig
@@ -280,7 +297,7 @@ index 0000000000..f18c4ff75b
 + obj-$(CONFIG_NET_VENDOR_SILAN) += silan/
 +--- /dev/null
 ++++ b/drivers/net/ethernet/rtl8197f_eth.c
-+@@ -0,0 +1,340 @@
++@@ -0,0 +1,346 @@
 ++// SPDX-License-Identifier: GPL-2.0-only
 ++/*
 ++ * Clean-room RTL8197F Ethernet driver.
@@ -443,7 +460,7 @@ index 0000000000..f18c4ff75b
 ++
 ++	if (!priv->datapath_ready) {
 ++		netdev_warn(ndev,
-++			    "MAC/MDIO register map unresolved; datapath disabled\n");
+++			    "rtl8197f-eth: ndo_open blocked, MAC/MDIO register map unresolved; datapath disabled\n");
 ++		return -EOPNOTSUPP;
 ++	}
 ++
@@ -544,6 +561,8 @@ index 0000000000..f18c4ff75b
 ++	struct net_device *ndev;
 ++	int err;
 ++
+++	dev_info(&pdev->dev, "rtl8197f-eth: probe start\n");
+++
 ++	ndev = devm_alloc_etherdev(&pdev->dev, sizeof(*priv));
 ++	if (!ndev)
 ++		return -ENOMEM;
@@ -556,16 +575,16 @@ index 0000000000..f18c4ff75b
 ++	priv->base = devm_platform_ioremap_resource(pdev, 0);
 ++	if (IS_ERR(priv->base))
 ++		return dev_err_probe(&pdev->dev, PTR_ERR(priv->base),
-++				     "missing RTL8197F Ethernet MMIO resource\n");
+++				     "rtl8197f-eth: no MMIO resource; DTS ethernet node missing or incomplete\n");
 ++
 ++	priv->irq = platform_get_irq_optional(pdev, 0);
 ++	if (priv->irq == -ENXIO) {
 ++		dev_warn(&pdev->dev,
-++			 "missing RTL8197F Ethernet IRQ resource; IRQ path disabled\n");
+++			 "rtl8197f-eth: no IRQ resource; IRQ/NAPI path disabled\n");
 ++		priv->irq = 0;
 ++	} else if (priv->irq < 0) {
 ++		return dev_err_probe(&pdev->dev, priv->irq,
-++				     "failed to read RTL8197F Ethernet IRQ\n");
+++				     "rtl8197f-eth: failed to read IRQ resource\n");
 ++	}
 ++
 ++	if (priv->irq > 0) {
@@ -573,7 +592,7 @@ index 0000000000..f18c4ff75b
 ++				       dev_name(&pdev->dev), ndev);
 ++		if (err)
 ++			return dev_err_probe(&pdev->dev, err,
-++					     "failed to request RTL8197F Ethernet IRQ\n");
+++					     "rtl8197f-eth: failed to request IRQ\n");
 ++	}
 ++
 ++	ndev->netdev_ops = &rtl8197f_eth_netdev_ops;
@@ -587,11 +606,11 @@ index 0000000000..f18c4ff75b
 ++	if (err) {
 ++		netif_napi_del(&priv->napi);
 ++		return dev_err_probe(&pdev->dev, err,
-++				     "failed to register RTL8197F Ethernet netdev\n");
+++				     "rtl8197f-eth: failed to register netdev\n");
 ++	}
 ++
 ++	netdev_warn(ndev,
-++		    "registered; DMA rings prepared but MAC/MDIO datapath disabled\n");
+++		    "rtl8197f-eth: registered; MDIO absent and datapath disabled, MAC register map unresolved\n");
 ++
 ++	return 0;
 ++}
