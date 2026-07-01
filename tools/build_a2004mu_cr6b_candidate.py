@@ -30,13 +30,6 @@ UIMAGE_MAGIC = b"\x27\x05\x19\x56"
 SQUASHFS_MAGIC = b"hsqs"
 KERNEL_MARKER = b"kernel\x00\x00"
 STOCK_LZMA_MAGIC = b"\x5d\x00\x00\x80\x00"
-STOCK_LZMA_FILTER = {
-    "id": lzma.FILTER_LZMA1,
-    "dict_size": 0x800000,
-    "lc": 3,
-    "lp": 0,
-    "pb": 2,
-}
 
 
 def align_up(value: int, alignment: int) -> int:
@@ -109,15 +102,72 @@ def find_stock_loader_end(stock_data: bytes, updater_skip_offset: int) -> int:
     return offset
 
 
-def make_stock_compatible_lzma(kernel_body: bytes) -> tuple[bytes, int]:
+def parse_lzma_props(props: bytes) -> tuple[int, int, int]:
+    if len(props) != 5:
+        raise ValueError("LZMA properties must be exactly 5 bytes")
+    value = props[0]
+    if value >= 9 * 5 * 5:
+        raise ValueError(f"invalid LZMA property byte: 0x{value:02x}")
+    lc = value % 9
+    value //= 9
+    lp = value % 5
+    pb = value // 5
+    dict_size = struct.unpack_from("<I", props, 1)[0]
+    return lc, lp, pb, dict_size
+
+
+def make_stock_compatible_lzma(kernel_body: bytes, props: bytes) -> tuple[bytes, int]:
     try:
         raw_kernel = lzma.decompress(kernel_body, format=lzma.FORMAT_ALONE)
     except lzma.LZMAError as exc:
         raise ValueError(f"OpenWrt uImage payload is not LZMA-alone decodable: {exc}") from exc
-    repacked = lzma.compress(raw_kernel, format=lzma.FORMAT_ALONE, filters=[STOCK_LZMA_FILTER])
-    if not repacked.startswith(STOCK_LZMA_MAGIC):
+    lc, lp, pb, dict_size = parse_lzma_props(props)
+    filters = [{"id": lzma.FILTER_LZMA1, "dict_size": dict_size, "lc": lc, "lp": lp, "pb": pb}]
+    repacked = bytearray(lzma.compress(raw_kernel, format=lzma.FORMAT_ALONE, filters=filters))
+    if not repacked.startswith(props):
         raise ValueError("repacked kernel does not use stock-compatible LZMA properties")
-    return repacked, len(raw_kernel)
+    struct.pack_into("<Q", repacked, 5, len(raw_kernel))
+    return bytes(repacked), len(raw_kernel)
+
+
+def lzma_contract_report(body: bytes, lzma_offset: int, rootfs_offset: int) -> tuple[bool, dict]:
+    report = {
+        "lzma_offset": lzma_offset,
+        "rootfs_offset": rootfs_offset,
+        "payload_end_before_rootfs": False,
+        "props": None,
+        "header_uncompressed_size": None,
+        "actual_uncompressed_size": None,
+        "compressed_payload_size": None,
+        "status": "fail",
+    }
+    if lzma_offset < 0 or rootfs_offset <= lzma_offset:
+        report["error"] = "invalid LZMA/rootfs offsets"
+        return False, report
+    payload = body[lzma_offset:rootfs_offset]
+    if len(payload) < 13:
+        report["error"] = "truncated LZMA header"
+        return False, report
+    report["props"] = payload[:5].hex()
+    report["header_uncompressed_size"] = struct.unpack_from("<Q", payload, 5)[0]
+    try:
+        decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_ALONE)
+        raw = decompressor.decompress(payload)
+    except lzma.LZMAError as exc:
+        report["error"] = str(exc)
+        return False, report
+    consumed = len(payload) - len(decompressor.unused_data)
+    report["actual_uncompressed_size"] = len(raw)
+    report["compressed_payload_size"] = consumed
+    report["payload_end_before_rootfs"] = lzma_offset + consumed <= rootfs_offset
+    if report["header_uncompressed_size"] != len(raw):
+        report["error"] = "LZMA header uncompressed size mismatch"
+        return False, report
+    if not decompressor.eof:
+        report["error"] = "LZMA stream did not reach EOF"
+        return False, report
+    report["status"] = "pass"
+    return True, report
 
 
 def build_stock_loader_image(
@@ -127,12 +177,14 @@ def build_stock_loader_image(
     rootfs_offset_arg: str,
     updater_skip_offset: int,
     kernel_payload_mode: str,
+    lzma_props: bytes,
+    variant: str | None,
 ) -> tuple[bytes, dict]:
     kernel_body, uimage_offset, uimage_kernel_end = read_uimage_kernel(openwrt_data)
     original_kernel_body = kernel_body
     uncompressed_kernel_size = None
     if kernel_payload_mode == "stock-lzma":
-        kernel_body, uncompressed_kernel_size = make_stock_compatible_lzma(kernel_body)
+        kernel_body, uncompressed_kernel_size = make_stock_compatible_lzma(kernel_body, lzma_props)
     elif kernel_payload_mode != "uimage-lzma":
         raise ValueError(f"unknown kernel payload mode: {kernel_payload_mode}")
 
@@ -178,6 +230,13 @@ def build_stock_loader_image(
     image[body_start : body_start + len(loader_prefix)] = loader_prefix
     image[body_start + loader_end : body_start + loader_end + len(kernel_body)] = kernel_body
     image[body_start + rootfs_offset : body_start + rootfs_offset + len(rootfs_blob)] = rootfs_blob
+    contract_ok, contract = lzma_contract_report(
+        bytes(image[body_start:body_end]),
+        loader_end,
+        rootfs_offset,
+    )
+    if not contract_ok:
+        raise ValueError(f"stock-loader LZMA contract failed: {contract.get('error', 'unknown')}")
 
     image[FW_OFFSET : FW_OFFSET + HEADER_LEN] = header
     upload_check_length, upload_primary, upload_protect2 = fill_iptime_header(
@@ -192,6 +251,7 @@ def build_stock_loader_image(
         "file_size": file_size,
         "updater_skip_offset": updater_skip_offset,
         "flash_body_size": body_size,
+        "variant": variant,
         "entry_layout": "stock-loader-raw-lzma",
         "kernel_payload_mode": kernel_payload_mode,
         "stock_loader_size": len(loader_prefix),
@@ -199,6 +259,8 @@ def build_stock_loader_image(
         "raw_kernel_payload_size": len(kernel_body),
         "uncompressed_kernel_size": uncompressed_kernel_size,
         "lzma_properties": kernel_body[:5].hex(),
+        "lzma_header_uncompressed_size": struct.unpack_from("<Q", kernel_body, 5)[0] if len(kernel_body) >= 13 else None,
+        "lzma_contract": contract,
         "rootfs_size": len(rootfs_blob),
         "rootfs_offset": rootfs_offset,
         "requested_rootfs_offset": requested_rootfs_offset,
@@ -339,7 +401,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rootfs-offset", default="auto")
     parser.add_argument("--entry-layout", choices=("stock-loader", "flash-body-cr6b"), default="stock-loader")
-    parser.add_argument("--updater-skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
+    parser.add_argument("--updater-skip-offset", "--skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
+    parser.add_argument("--variant")
+    parser.add_argument("--lzma-props", default=STOCK_LZMA_MAGIC.hex())
     parser.add_argument(
         "--kernel-payload-mode",
         choices=("stock-lzma", "uimage-lzma"),
@@ -349,6 +413,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     updater_skip_offset = parse_int(args.updater_skip_offset)
+    lzma_props = bytes.fromhex(args.lzma_props)
 
     repo = Path.cwd()
     if not output_outside_repo(args.output, repo):
@@ -369,6 +434,8 @@ def main() -> int:
             args.rootfs_offset,
             updater_skip_offset,
             args.kernel_payload_mode,
+            lzma_props,
+            args.variant,
         )
     else:
         image, report = build_image(
@@ -413,12 +480,16 @@ def main() -> int:
         if "stock_loader_size" in report:
             print(f"stock loader size: {report['stock_loader_size']} bytes (0x{report['stock_loader_size']:x})")
             print(f"kernel payload mode: {report['kernel_payload_mode']}")
+            if report.get("variant"):
+                print(f"variant: {report['variant']}")
             if report.get("uncompressed_kernel_size") is not None:
                 print(
                     "uncompressed kernel size: "
                     f"{report['uncompressed_kernel_size']} bytes (0x{report['uncompressed_kernel_size']:x})"
                 )
             print(f"LZMA properties: {report['lzma_properties']}")
+            print(f"LZMA header uncompressed size: 0x{report['lzma_header_uncompressed_size']:x}")
+            print(f"LZMA contract: {report['lzma_contract']['status']}")
             print(f"raw kernel payload size: {report['raw_kernel_payload_size']} bytes (0x{report['raw_kernel_payload_size']:x})")
         print(f"rootfs size: {report['rootfs_size']} bytes (0x{report['rootfs_size']:x})")
         print(f"rootfs offset: 0x{report['rootfs_offset']:x}")

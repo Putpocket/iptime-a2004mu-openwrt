@@ -112,22 +112,68 @@ def looks_like_mips_code(data: bytes, offset: int = 0) -> bool:
     return any(op in {0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0f, 0x23, 0x2b} for op in opcodes)
 
 
-def lzma_status(data: bytes, offset: int, end: int | None = None) -> str:
+def lzma_details(data: bytes, offset: int, end: int | None = None) -> dict:
+    details = {
+        "ok": False,
+        "props": None,
+        "header_uncompressed_size": None,
+        "actual_uncompressed_size": None,
+        "consumed": None,
+        "unused": None,
+        "eof": False,
+        "error": None,
+    }
     if offset < 0:
-        return "unavailable"
+        details["error"] = "unavailable"
+        return details
     payload = data[offset:end] if end is not None and end > offset else data[offset:]
-    props = payload[:5].hex() if len(payload) >= 5 else payload.hex()
+    details["props"] = payload[:5].hex() if len(payload) >= 5 else payload.hex()
+    if len(payload) >= 13:
+        details["header_uncompressed_size"] = struct.unpack_from("<Q", payload, 5)[0]
     try:
         decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_ALONE)
         out = decompressor.decompress(payload)
     except lzma.LZMAError as exc:
-        return f"FAIL props={props} error={exc}"
+        details["error"] = str(exc)
+        return details
     consumed = len(payload) - len(decompressor.unused_data)
-    eof = "yes" if decompressor.eof else "no"
-    return (
-        f"OK props={props} uncompressed_size=0x{len(out):x} "
-        f"consumed=0x{consumed:x} unused=0x{len(decompressor.unused_data):x} eof={eof}"
+    details.update(
+        {
+            "ok": True,
+            "actual_uncompressed_size": len(out),
+            "consumed": consumed,
+            "unused": len(decompressor.unused_data),
+            "eof": decompressor.eof,
+        }
     )
+    return details
+
+
+def lzma_status(data: bytes, offset: int, end: int | None = None) -> str:
+    details = lzma_details(data, offset, end)
+    if not details["ok"]:
+        return f"FAIL props={details['props']} error={details['error']}"
+    eof = "yes" if details["eof"] else "no"
+    return (
+        f"OK props={details['props']} "
+        f"header_uncompressed_size=0x{details['header_uncompressed_size']:x} "
+        f"actual_uncompressed_size=0x{details['actual_uncompressed_size']:x} "
+        f"consumed=0x{details['consumed']:x} unused=0x{details['unused']:x} eof={eof}"
+    )
+
+
+def value_hits(data: bytes, value: int) -> list[str]:
+    hits = []
+    for endian, fmt in (("le", "<I"), ("be", ">I")):
+        needle = struct.pack(fmt, value & 0xFFFFFFFF)
+        start = 0
+        while True:
+            offset = data.find(needle, start)
+            if offset < 0:
+                break
+            hits.append(f"{endian}@0x{offset:x}")
+            start = offset + 1
+    return hits
 
 
 def print_hexdump_line(label: str, data: bytes, offset: int, length: int = 64) -> None:
@@ -161,7 +207,7 @@ def print_cr6b_words(data: bytes, cr6b: int, known: dict[str, int], absolute_bas
         )
 
 
-def print_file(path: Path, updater_skip_offset: int) -> None:
+def print_file(path: Path, updater_skip_offset: int, contract_check: bool = False) -> bool:
     data = path.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     known = known_values(data)
@@ -198,7 +244,7 @@ def print_file(path: Path, updater_skip_offset: int) -> None:
     if len(data) <= updater_skip_offset:
         print("flash_body unavailable: file smaller than updater skip offset")
         print()
-        return
+        return not contract_check
 
     body = data[updater_skip_offset:]
     body_known = known_values(body, updater_skip_offset)
@@ -285,21 +331,61 @@ def print_file(path: Path, updater_skip_offset: int) -> None:
             f"{lzma_status(body, offset, body_rootfs if body_rootfs >= 0 else None)}"
         )
 
+    contract_pass = True
+    if contract_check:
+        lzma_offset = body_lzma_stock if body_lzma_stock >= 0 else body_lzma_openwrt
+        details = lzma_details(body, lzma_offset, body_rootfs if body_rootfs >= 0 else None)
+        compressed_size = details["consumed"] if details["ok"] else None
+        checks = {
+            "loader_entry_code": looks_like_mips_code(body, 0),
+            "lzma_payload_found": lzma_offset >= 0,
+            "lzma_props_stock": details["props"] == MAGICS["lzma_alone_stock"].hex(),
+            "lzma_decodes": details["ok"],
+            "lzma_header_size_matches_actual": details["ok"]
+            and details["header_uncompressed_size"] == details["actual_uncompressed_size"],
+            "compressed_payload_end_before_rootfs": details["ok"]
+            and body_rootfs >= 0
+            and lzma_offset + details["consumed"] <= body_rootfs,
+            "squashfs_found": body_rootfs >= 0,
+        }
+        contract_pass = all(checks.values())
+        print(f"contract_status {'PASS' if contract_pass else 'FAIL'}")
+        for name, passed in checks.items():
+            print(f"contract_{name} {'PASS' if passed else 'FAIL'}")
+        if details["ok"]:
+            loader_prefix = body[:lzma_offset]
+            candidates = {
+                "compressed_size": compressed_size,
+                "uncompressed_size": details["actual_uncompressed_size"],
+                "payload_offset": lzma_offset,
+                "load_address": 0x80A00000,
+                "flash_offset": 0x40000,
+            }
+            for name, value in candidates.items():
+                if value is None:
+                    continue
+                hits = value_hits(loader_prefix, value)
+                rendered = " ".join(hits[:16]) if hits else "none"
+                print(f"contract_loader_field_hits {name}=0x{value:x} {rendered}")
+
     print()
+    return contract_pass or not contract_check
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze A2004MU CR6B candidate structure.")
-    parser.add_argument("--updater-skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
+    parser.add_argument("--updater-skip-offset", "--skip-offset", default=hex(DEFAULT_UPDATER_SKIP_OFFSET))
+    parser.add_argument("--contract-check", action="store_true")
     parser.add_argument("paths", type=Path, nargs="+")
     args = parser.parse_args()
     updater_skip_offset = int(args.updater_skip_offset, 0)
 
+    ok = True
     for path in args.paths:
         if not path.is_file():
             parser.error(f"not a file: {path}")
-        print_file(path, updater_skip_offset)
-    return 0
+        ok = print_file(path, updater_skip_offset, args.contract_check) and ok
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
