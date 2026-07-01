@@ -404,6 +404,12 @@ def main() -> int:
     parser.add_argument("--sdk-candidate", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rootfs-offset", default="auto")
+    parser.add_argument(
+        "--path-mode",
+        choices=("explicit", "web-admin"),
+        default="explicit",
+        help="web-admin mode is disabled until get_sys_params offset prediction passes regression",
+    )
     parser.add_argument("--entry-layout", choices=("stock-loader", "flash-body-cr6b"), default="stock-loader")
     parser.add_argument(
         "--updater-skip-offset",
@@ -423,6 +429,11 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.path_mode == "web-admin":
+        parser.error(
+            "--path-mode web-admin requires a validated get_sys_params offset predictor; "
+            "run tools/regress_a2004mu_web_offset.py first"
+        )
     updater_skip_offset = parse_int(args.updater_skip_offset)
     loader_source_offset = parse_int(args.loader_source_offset)
     lzma_props = bytes.fromhex(args.lzma_props)
