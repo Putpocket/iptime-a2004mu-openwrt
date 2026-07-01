@@ -22,6 +22,10 @@ BODY_HEADER_LEN = 0x38
 BODY_KDESC_OFFSET = BODY_HEADER_LEN
 BODY_CR6B_OFFSET = BODY_HEADER_LEN + KDESC_LEN
 MAGICS = {
+    "lzma_alone_stock": b"\x5d\x00\x00\x80\x00",
+    "lzma_alone_openwrt": b"\x6d\x00\x00\x80\x00",
+    "gzip": b"\x1f\x8b",
+    "xz": b"\xfd7zXZ\x00",
     "kernel": b"kernel",
     "cr6b": b"cr6b",
     "cs6c": b"cs6c",
@@ -96,6 +100,23 @@ def labels_for(value: int, known: dict[str, int]) -> str:
     return ",".join(labels) if labels else "-"
 
 
+
+def looks_like_mips_code(data: bytes, offset: int = 0) -> bool:
+    if offset + 16 > len(data):
+        return False
+    words = [u32be(data, offset + i) for i in range(0, 16, 4)]
+    if any(word is None for word in words):
+        return False
+    opcodes = [(word >> 26) & 0x3f for word in words if word is not None]
+    return any(op in {0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0f, 0x23, 0x2b} for op in opcodes)
+
+
+def print_hexdump_line(label: str, data: bytes, offset: int, length: int = 64) -> None:
+    if offset >= len(data):
+        print(f"{label} 0x{offset:x} unavailable")
+        return
+    print(f"{label} 0x{offset:x} {data[offset:offset+length].hex(' ')}")
+
 def print_magic_offsets(data: bytes, prefix: str = "") -> None:
     for name, marker in MAGICS.items():
         offsets = find_all(data, marker)
@@ -166,17 +187,45 @@ def print_file(path: Path) -> None:
     print(f"flash_body_size {len(body)} 0x{len(body):x}")
     print(f"flash_body_fits_8mb {'yes' if len(body) <= FLASH_SIZE else 'no'}")
     print(f"flash_body_check_firmware_size_candidate {len(body)} 0x{len(body):x}")
+    print_hexdump_line("flash_body_entry_bytes", body, 0, 64)
+    print_hexdump_line("flash_body_offset_0x38_bytes", body, 0x38, 64)
+    print_hexdump_line("flash_body_offset_0x48_bytes", body, 0x48, 64)
+    print_hexdump_line("flash_body_offset_0x100_bytes", body, 0x100, 64)
+    print_hexdump_line("flash_body_offset_0x1000_bytes", body, 0x1000, 64)
+    print_hexdump_line("flash_body_offset_0x10000_bytes", body, 0x10000, 64)
+    print(f"flash_body_entry_code_heuristic {'yes' if looks_like_mips_code(body, 0) else 'no'}")
+    if body.startswith(b'a2004m') or body.startswith(b'kernel') or body.startswith(MAGICS["cr6b"]):
+        print("flash_body_entry_warning metadata_at_entry")
+    elif not looks_like_mips_code(body, 0):
+        print("flash_body_entry_warning not_obviously_mips_code")
+    else:
+        print("flash_body_entry_warning none")
     print_magic_offsets(body, "flash_body_")
     body_kdesc_probe = body.find(b"kernel\x00\x00")
     body_cr6b_probe = body.find(MAGICS["cr6b"])
     body_squashfs_probe = body.find(MAGICS["hsqs"])
-    structure_pass = (
+    body_lzma_openwrt = body.find(MAGICS["lzma_alone_openwrt"])
+    body_lzma_stock = body.find(MAGICS["lzma_alone_stock"])
+    cr6b_structure_pass = (
         body_kdesc_probe == BODY_KDESC_OFFSET
         and body_cr6b_probe == BODY_CR6B_OFFSET
         and body_squashfs_probe >= 0
         and body_squashfs_probe % 0x10000 == 0
     )
-    print(f"flash_body_structure {'PASS' if structure_pass else 'WARN'}")
+    stock_loader_structure_pass = (
+        looks_like_mips_code(body, 0)
+        and body_kdesc_probe != 0
+        and body_cr6b_probe != 0
+        and (body_lzma_openwrt >= 0 or body_lzma_stock >= 0)
+        and body_squashfs_probe >= 0
+        and body_squashfs_probe % 0x10000 == 0
+    )
+    if cr6b_structure_pass:
+        print("flash_body_structure PASS cr6b-body")
+    elif stock_loader_structure_pass:
+        print("flash_body_structure PASS stock-loader")
+    else:
+        print("flash_body_structure WARN")
 
     body_kdesc = body_kdesc_probe
     if body_kdesc >= 0 and body_kdesc + KDESC_LEN <= len(body):
