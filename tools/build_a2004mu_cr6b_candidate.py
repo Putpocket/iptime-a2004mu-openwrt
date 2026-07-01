@@ -21,6 +21,10 @@ from verify_iptime_checksum import (
 
 KDESC_LEN = 0x10
 CR6B_OFFSET = FW_OFFSET + HEADER_LEN + KDESC_LEN
+UPDATER_SKIP_OFFSET = 0x400C2
+BODY_HEADER_OFFSET = 0
+BODY_KDESC_OFFSET = HEADER_LEN
+BODY_CR6B_OFFSET = HEADER_LEN + KDESC_LEN
 UIMAGE_MAGIC = b"\x27\x05\x19\x56"
 SQUASHFS_MAGIC = b"hsqs"
 KERNEL_MARKER = b"kernel\x00\x00"
@@ -61,10 +65,26 @@ def read_template(data: bytes) -> tuple[bytearray, bytes]:
     if len(data) < CR6B_OFFSET + 0x10:
         raise ValueError("template image is too small")
     if data[FW_OFFSET + HEADER_LEN : FW_OFFSET + HEADER_LEN + len(KERNEL_MARKER)] != KERNEL_MARKER:
-        raise ValueError("template does not contain kernel descriptor at 0x40038")
+        raise ValueError("template does not contain kernel descriptor at upload offset 0x40038")
     if data[CR6B_OFFSET : CR6B_OFFSET + 4] != b"cr6b":
-        raise ValueError("template does not contain cr6b at 0x40048")
+        raise ValueError("template does not contain cr6b at upload offset 0x40048")
     return bytearray(data[FW_OFFSET : FW_OFFSET + HEADER_LEN]), data[CR6B_OFFSET : CR6B_OFFSET + 0x10]
+
+
+def fill_iptime_header(image: bytearray, header_offset: int, check_start: int, check_end: int, rootfs_offset: int) -> tuple[int, int, int]:
+    struct.pack_into("<I", image, header_offset + 0x10, PROTECT2_MAGIC)
+    struct.pack_into("<I", image, header_offset + 0x14, 0)
+    struct.pack_into("<I", image, header_offset + 0x2C, rootfs_offset)
+    struct.pack_into("<I", image, header_offset + 0x30, check_end - check_start)
+    struct.pack_into("<I", image, header_offset + 0x34, 0)
+
+    payload = image[check_start:check_end]
+    byte_sum = sum(payload) & 0xFFFFFFFF
+    primary = protect_crc_candidate(byte_sum, PROTECT2_SECRET_CANDIDATE, image[header_offset : header_offset + 8])
+    protect2 = protect_crc2_candidate(primary, PROTECT2_SECRET_CANDIDATE, image[header_offset : header_offset + 8])
+    struct.pack_into("<I", image, header_offset + 0x14, protect2)
+    struct.pack_into("<I", image, header_offset + 0x34, primary)
+    return check_end - check_start, primary, protect2
 
 
 def build_image(
@@ -86,56 +106,73 @@ def build_image(
 
     requested_rootfs_offset = None
     if rootfs_offset_arg == "auto":
-        template_rootfs_offset = struct.unpack_from("<I", template_data, FW_OFFSET + 0x2C)[0]
-        rootfs_offset = template_rootfs_offset
+        rootfs_offset = struct.unpack_from("<I", template_data, FW_OFFSET + 0x2C)[0]
     else:
         rootfs_offset = int(rootfs_offset_arg, 0)
         requested_rootfs_offset = rootfs_offset
 
-    min_rootfs_offset = align_up(CR6B_OFFSET + len(kernel_blob), 0x10000)
+    min_rootfs_offset = align_up(BODY_CR6B_OFFSET + len(kernel_blob), 0x10000)
     if rootfs_offset < min_rootfs_offset:
         if requested_rootfs_offset is not None:
             raise ValueError(
-                "requested rootfs offset overlaps kernel: "
+                "requested flash-body rootfs offset overlaps kernel: "
                 f"requested=0x{requested_rootfs_offset:x} minimum=0x{min_rootfs_offset:x}"
             )
         rootfs_offset = min_rootfs_offset
 
-    file_size = rootfs_offset + len(rootfs_blob)
-    if file_size > FLASH_SIZE:
-        raise ValueError(f"planned output exceeds 8MB flash: 0x{file_size:x}")
-    if len(stock_data) < FW_OFFSET:
-        raise ValueError("stock firmware is too small for prefix copy")
+    body_size = rootfs_offset + len(rootfs_blob)
+    file_size = UPDATER_SKIP_OFFSET + body_size
+    if body_size > FLASH_SIZE:
+        raise ValueError(f"planned flash body exceeds 8MB flash: 0x{body_size:x}")
+    if file_size <= UPDATER_SKIP_OFFSET:
+        raise ValueError("planned output has empty flash body")
+    if len(stock_data) < UPDATER_SKIP_OFFSET:
+        raise ValueError("stock firmware is too small for updater prefix copy")
 
-    image = bytearray(stock_data[:FW_OFFSET])
-    image.extend(b"\x00" * (file_size - len(image)))
+    image = bytearray(stock_data[:UPDATER_SKIP_OFFSET])
+    image.extend(b"\x00" * body_size)
 
-    struct.pack_into("<I", header, 0x10, PROTECT2_MAGIC)
-    struct.pack_into("<I", header, 0x14, 0)
-    struct.pack_into("<I", header, 0x2C, rootfs_offset)
-    struct.pack_into("<I", header, 0x30, 0)
-    struct.pack_into("<I", header, 0x34, 0)
+    body_start = UPDATER_SKIP_OFFSET
+    body_end = body_start + body_size
+    body_header_offset = body_start + BODY_HEADER_OFFSET
+    body_kdesc_offset = body_start + BODY_KDESC_OFFSET
+    body_cr6b_offset = body_start + BODY_CR6B_OFFSET
+    body_rootfs_offset = body_start + rootfs_offset
+
+    image[body_header_offset : body_header_offset + HEADER_LEN] = header
 
     kernel_sum = sum(kernel_blob) & 0xFFFFFFFF
     descriptor = KERNEL_MARKER + struct.pack("<I", len(kernel_blob)) + struct.pack("<I", kernel_sum)
 
+    image[body_kdesc_offset : body_kdesc_offset + KDESC_LEN] = descriptor
+    image[body_cr6b_offset : body_cr6b_offset + len(kernel_blob)] = kernel_blob
+    image[body_rootfs_offset : body_rootfs_offset + len(rootfs_blob)] = rootfs_blob
+
+    body_check_length, body_primary, body_protect2 = fill_iptime_header(
+        image,
+        body_header_offset,
+        body_kdesc_offset,
+        body_end,
+        rootfs_offset,
+    )
+
+    # The web updater still validates the upload header at 0x40000. Keep that
+    # header valid for the whole uploaded file while placing a second valid
+    # header at the flash body start that the bootloader will see after the
+    # updater skips 0x400c2 bytes.
     image[FW_OFFSET : FW_OFFSET + HEADER_LEN] = header
-    image[FW_OFFSET + HEADER_LEN : FW_OFFSET + HEADER_LEN + KDESC_LEN] = descriptor
-    image[CR6B_OFFSET : CR6B_OFFSET + len(kernel_blob)] = kernel_blob
-    image[rootfs_offset : rootfs_offset + len(rootfs_blob)] = rootfs_blob
-
-    check_length = file_size - (FW_OFFSET + HEADER_LEN)
-    struct.pack_into("<I", image, FW_OFFSET + 0x30, check_length)
-
-    payload = image[FW_OFFSET + HEADER_LEN : file_size]
-    byte_sum = sum(payload) & 0xFFFFFFFF
-    primary = protect_crc_candidate(byte_sum, PROTECT2_SECRET_CANDIDATE, header)
-    protect2 = protect_crc2_candidate(primary, PROTECT2_SECRET_CANDIDATE, header)
-    struct.pack_into("<I", image, FW_OFFSET + 0x14, protect2)
-    struct.pack_into("<I", image, FW_OFFSET + 0x34, primary)
+    upload_check_length, upload_primary, upload_protect2 = fill_iptime_header(
+        image,
+        FW_OFFSET,
+        FW_OFFSET + HEADER_LEN,
+        file_size,
+        rootfs_offset,
+    )
 
     report = {
         "file_size": file_size,
+        "updater_skip_offset": UPDATER_SKIP_OFFSET,
+        "flash_body_size": body_size,
         "kernel_size": len(kernel_blob),
         "kernel_sum": kernel_sum,
         "rootfs_size": len(rootfs_blob),
@@ -144,12 +181,18 @@ def build_image(
         "uimage_offset": uimage_offset,
         "uimage_kernel_end": uimage_kernel_end,
         "squashfs_input_offset": squashfs_offset,
-        "payload_marker_offset": FW_OFFSET + HEADER_LEN,
-        "cr6b_offset": CR6B_OFFSET,
-        "check_length": check_length,
-        "primary_checksum": primary,
-        "protect2_checksum": protect2,
-        "fits_8mb": file_size <= FLASH_SIZE,
+        "payload_marker_offset": body_kdesc_offset,
+        "cr6b_offset": body_cr6b_offset,
+        "flash_body_payload_marker_offset": BODY_KDESC_OFFSET,
+        "flash_body_cr6b_offset": BODY_CR6B_OFFSET,
+        "flash_body_squashfs_offset": rootfs_offset,
+        "upload_check_length": upload_check_length,
+        "upload_primary_checksum": upload_primary,
+        "upload_protect2_checksum": upload_protect2,
+        "body_check_length": body_check_length,
+        "body_primary_checksum": body_primary,
+        "body_protect2_checksum": body_protect2,
+        "fits_8mb": body_size <= FLASH_SIZE,
     }
     return bytes(image), report
 
@@ -207,12 +250,16 @@ def main() -> int:
         print("WARNING: EXPERIMENTAL OUTPUT ONLY; not web-admin tested; not hardware validated")
         print(f"output: {output}")
         print(f"file size: {len(image)} bytes (0x{len(image):x})")
+        print(f"updater skip offset: 0x{report['updater_skip_offset']:x}")
+        print(f"flash body size: {report['flash_body_size']} bytes (0x{report['flash_body_size']:x})")
         print(f"sha256: {sha256_bytes(image)}")
         print(f"kernel size: {report['kernel_size']} bytes (0x{report['kernel_size']:x})")
         print(f"rootfs size: {report['rootfs_size']} bytes (0x{report['rootfs_size']:x})")
         print(f"rootfs offset: 0x{report['rootfs_offset']:x}")
-        print(f"payload marker offset: 0x{report['payload_marker_offset']:x}")
-        print(f"cr6b offset: 0x{report['cr6b_offset']:x}")
+        print(f"payload marker file offset: 0x{report['payload_marker_offset']:x}")
+        print(f"cr6b file offset: 0x{report['cr6b_offset']:x}")
+        print(f"flash-body payload marker offset: 0x{report['flash_body_payload_marker_offset']:x}")
+        print(f"flash-body cr6b offset: 0x{report['flash_body_cr6b_offset']:x}")
         print(f"SquashFS input offset: 0x{report['squashfs_input_offset']:x}")
         print(f"self-check status: {self_check['status']}")
         print(f"self-check all matched: {'yes' if self_check['matches']['all'] else 'no'}")
