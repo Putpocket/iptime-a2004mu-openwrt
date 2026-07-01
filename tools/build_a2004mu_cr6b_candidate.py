@@ -24,7 +24,7 @@ KDESC_LEN = 0x10
 CR6B_OFFSET = FW_OFFSET + HEADER_LEN + KDESC_LEN
 DEFAULT_UPDATER_SKIP_OFFSET = 0x400C0
 WEB_ADMIN_BODY_OFFSET = FW_OFFSET
-WEB_ADMIN_HEADER_OFFSET = FW_OFFSET - HEADER_LEN
+WEB_ADMIN_HEADER_OFFSET = FW_OFFSET
 BODY_HEADER_OFFSET = 0
 BODY_KDESC_OFFSET = HEADER_LEN
 BODY_CR6B_OFFSET = HEADER_LEN + KDESC_LEN
@@ -267,6 +267,19 @@ def build_stock_loader_image(
     image[body_start : body_start + len(loader_prefix)] = loader_prefix
     image[body_start + loader_end : body_start + loader_end + len(kernel_body)] = kernel_body
     image[body_start + rootfs_offset : body_start + rootfs_offset + len(rootfs_blob)] = rootfs_blob
+    descriptor_offset = body_start + BODY_KDESC_OFFSET
+    cr6b_offset = body_start + BODY_CR6B_OFFSET
+    kernel_end = body_start + loader_end + len(kernel_body)
+    descriptor_length = kernel_end - cr6b_offset
+    cr6b_body_size = descriptor_length - KDESC_LEN
+    if image[cr6b_offset : cr6b_offset + 4] == b"cr6b":
+        struct.pack_into(">I", image, cr6b_offset + 0x0C, cr6b_body_size)
+    if image[descriptor_offset : descriptor_offset + len(KERNEL_MARKER)] == KERNEL_MARKER:
+        descriptor_sum = sum(image[cr6b_offset:kernel_end]) & 0xFFFFFFFF
+        struct.pack_into("<I", image, descriptor_offset + 0x08, descriptor_length)
+        struct.pack_into("<I", image, descriptor_offset + 0x0C, descriptor_sum)
+    else:
+        descriptor_sum = None
     contract_ok, contract = lzma_contract_report(
         bytes(image[body_start:body_end]),
         loader_end,
@@ -275,8 +288,8 @@ def build_stock_loader_image(
     if not contract_ok:
         raise ValueError(f"stock-loader LZMA contract failed: {contract.get('error', 'unknown')}")
 
-    if header_offset < 0 or header_offset + HEADER_LEN > body_start:
-        raise ValueError("ipTIME header must fit before the web-admin flash body")
+    if header_offset < 0 or header_offset + HEADER_LEN > len(image):
+        raise ValueError("ipTIME header range exceeds planned output")
     image[header_offset : header_offset + HEADER_LEN] = header
     upload_check_length, upload_primary, upload_protect2 = fill_iptime_header(
         image,
@@ -296,6 +309,9 @@ def build_stock_loader_image(
         "entry_layout": "stock-loader-raw-lzma",
         "kernel_payload_mode": kernel_payload_mode,
         "stock_loader_size": len(loader_prefix),
+        "descriptor_length": descriptor_length,
+        "descriptor_checksum": descriptor_sum,
+        "cr6b_body_size": cr6b_body_size,
         "original_uimage_payload_size": len(original_kernel_body),
         "raw_kernel_payload_size": len(kernel_body),
         "uncompressed_kernel_size": uncompressed_kernel_size,
@@ -484,6 +500,7 @@ def main() -> int:
     if args.path_mode == "web-admin":
         body_offset = WEB_ADMIN_BODY_OFFSET
         header_offset = WEB_ADMIN_HEADER_OFFSET
+        loader_source_offset = WEB_ADMIN_BODY_OFFSET
     else:
         body_offset = updater_skip_offset
         header_offset = FW_OFFSET

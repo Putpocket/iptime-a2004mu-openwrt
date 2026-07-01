@@ -27,8 +27,9 @@ CR6B_OFFSET = KDESC_OFFSET + KDESC_LEN
 FLASH_SIZE = 0x800000
 DEFAULT_UPDATER_SKIP_OFFSET = 0x400C0
 WEB_ADMIN_BODY_OFFSET = FW_OFFSET
-WEB_ADMIN_HEADER_OFFSET = FW_OFFSET - HEADER_LEN
-WEB_ADMIN_LZMA_OFFSET = 0x27A0
+WEB_ADMIN_HEADER_OFFSET = FW_OFFSET
+WEB_ADMIN_LOADER_CODE_OFFSET = 0xC0
+WEB_ADMIN_LZMA_OFFSET = 0x2860
 BODY_HEADER_LEN = 0x38
 BODY_KDESC_OFFSET = BODY_HEADER_LEN
 BODY_CR6B_OFFSET = BODY_HEADER_LEN + KDESC_LEN
@@ -107,6 +108,12 @@ def checksum_status(path: Path, data: bytes) -> str:
     except ValueError as exc:
         return f"unavailable: {exc}"
     return "MATCH" if result["matches"]["all"] else "MISMATCH"
+
+
+def product_field(data: bytes, header_offset: int) -> str:
+    if header_offset + 8 > len(data):
+        return ""
+    return data[header_offset : header_offset + 8].split(b"\x00", 1)[0].decode("ascii", errors="replace")
 
 
 def known_values(data: bytes, base_offset: int = 0) -> dict[str, int]:
@@ -266,6 +273,9 @@ def print_file(
     print(f"fits_8mb {'yes' if len(data) <= FLASH_SIZE else 'no'}")
     print(f"checksum {checksum_status_at(path, data, header_offset)}")
     print(f"checksum_header_offset 0x{header_offset:x}")
+    product = product_field(data, header_offset)
+    print(f"web_header_product {product!r}")
+    print(f"web_header_product_check {'PASS' if product == 'a2004m' else 'FAIL'}")
 
     print_magic_offsets(data)
 
@@ -308,7 +318,9 @@ def print_file(
     print_hexdump_line("flash_body_offset_0x1000_bytes", body, 0x1000, 64)
     print_hexdump_line("flash_body_offset_0x10000_bytes", body, 0x10000, 64)
     print(f"flash_body_entry_code_heuristic {'yes' if looks_like_mips_code(body, 0) else 'no'}")
-    if body.startswith(b'a2004m') or body.startswith(b'kernel') or body.startswith(MAGICS["cr6b"]):
+    if body.startswith(b'a2004m'):
+        print("flash_body_entry_warning web_header_at_entry")
+    elif body.startswith(b'kernel') or body.startswith(MAGICS["cr6b"]):
         print("flash_body_entry_warning metadata_at_entry")
     elif not looks_like_mips_code(body, 0):
         print("flash_body_entry_warning not_obviously_mips_code")
@@ -332,8 +344,9 @@ def print_file(
         stock_lzma_offset,
         body_squashfs_probe if body_squashfs_probe >= 0 else None,
     ).startswith("OK ")
+    stock_loader_code_offset = WEB_ADMIN_LOADER_CODE_OFFSET if header_offset == WEB_ADMIN_HEADER_OFFSET else 0
     stock_loader_structure_pass = (
-        looks_like_mips_code(body, 0)
+        looks_like_mips_code(body, stock_loader_code_offset)
         and body_kdesc_probe != 0
         and body_cr6b_probe != 0
         and stock_loader_lzma_ok
@@ -386,7 +399,8 @@ def print_file(
         details = lzma_details(body, lzma_offset, body_rootfs if body_rootfs >= 0 else None)
         compressed_size = details["consumed"] if details["ok"] else None
         checks = {
-            "loader_entry_code": looks_like_mips_code(body, 0),
+            "web_header_product": product == "a2004m",
+            "loader_entry_code": looks_like_mips_code(body, stock_loader_code_offset),
             "lzma_payload_found": lzma_offset >= 0,
             "lzma_payload_expected_offset": expected_lzma_offset is None or lzma_offset == expected_lzma_offset,
             "lzma_props_stock": details["props"] == MAGICS["lzma_alone_stock"].hex(),
