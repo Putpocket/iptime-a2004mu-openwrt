@@ -291,12 +291,13 @@ def build_stock_loader_image(
     if header_offset < 0 or header_offset + HEADER_LEN > len(image):
         raise ValueError("ipTIME header range exceeds planned output")
     image[header_offset : header_offset + HEADER_LEN] = header
+    rootfs_file_offset = body_start + rootfs_offset
     upload_check_length, upload_primary, upload_protect2 = fill_iptime_header(
         image,
         header_offset,
         header_offset + HEADER_LEN,
         file_size,
-        rootfs_offset,
+        rootfs_file_offset,
     )
 
     report = {
@@ -320,6 +321,7 @@ def build_stock_loader_image(
         "lzma_contract": contract,
         "rootfs_size": len(rootfs_blob),
         "rootfs_offset": rootfs_offset,
+        "rootfs_file_offset": rootfs_file_offset,
         "requested_rootfs_offset": requested_rootfs_offset,
         "uimage_offset": uimage_offset,
         "uimage_header_removed": True,

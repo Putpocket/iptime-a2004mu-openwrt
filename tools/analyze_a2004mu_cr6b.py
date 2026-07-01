@@ -30,7 +30,7 @@ WEB_ADMIN_BODY_OFFSET = FW_OFFSET
 WEB_ADMIN_HEADER_OFFSET = FW_OFFSET
 WEB_ADMIN_LOADER_CODE_OFFSET = 0xC0
 WEB_ADMIN_LZMA_OFFSET = 0x2860
-WEB_ADMIN_ROOTFS_OFFSET = 0x280000
+STOCK_WEB_ADMIN_ROOTFS_OFFSET = 0x280000
 SYSPARAM_MAGIC_OFFSET = 0x1FC00
 SYSPARAM_PRODUCT_OFFSET = 0x1FC08
 SYSPARAM_MAGIC = b"BTMAGIN\x00"
@@ -292,6 +292,8 @@ def print_file(
     product = product_field(data, header_offset)
     print(f"web_header_product {product!r}")
     print(f"web_header_product_check {'PASS' if product == 'a2004m' else 'FAIL'}")
+    header_rootfs = u32le(data, header_offset + 0x2C)
+    print(f"web_header_rootfs_field 0x{header_rootfs:x}")
 
     print_magic_offsets(data)
 
@@ -403,6 +405,16 @@ def print_file(
     ]
     body_rootfs = body.find(MAGICS["hsqs"])
     if body_rootfs >= 0:
+        print(f"flash_body_rootfs_offset 0x{body_rootfs:x}")
+        print(f"flash_file_rootfs_offset 0x{updater_skip_offset + body_rootfs:x}")
+        print(
+            "flash_body_rootfs_stock_offset_warning "
+            f"{'none' if body_rootfs == STOCK_WEB_ADMIN_ROOTFS_OFFSET else 'differs_from_stock_0x280000'}"
+        )
+        print(
+            "web_header_rootfs_field_check "
+            f"{'PASS' if header_rootfs == updater_skip_offset + body_rootfs else 'FAIL'}"
+        )
         print(f"flash_body_squashfs_bytes_used 0x{bytes_used_squashfs(body, body_rootfs):x}")
     for offset in sorted(set(lzma_offsets)):
         print(
@@ -431,7 +443,8 @@ def print_file(
             and body_rootfs >= 0
             and lzma_offset + details["consumed"] <= body_rootfs,
             "squashfs_found": body_rootfs >= 0,
-            "squashfs_expected_offset": expected_lzma_offset is None or body_rootfs == WEB_ADMIN_ROOTFS_OFFSET,
+            "rootfs_header_matches_hsqs": body_rootfs >= 0
+            and header_rootfs == updater_skip_offset + body_rootfs,
         }
         contract_pass = all(checks.values())
         print(f"contract_status {'PASS' if contract_pass else 'FAIL'}")
