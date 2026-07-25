@@ -40,6 +40,16 @@ It does not provide a flash-verified OpenWrt image.
 * Local SDK `AP-fw.bin` starts with `cs6c`.
 * Local SDK `AP-fw.bin` SquashFS offset: `0x19c000`.
 * Local SDK `AP-fw.bin` reports `linuxpart=0x40000` and `hwpart=0x20000`.
+* `cr6b` header at file offset `0x40048` is 16 bytes big-endian:
+  signature, `startAddr`, `burnAddr`, `len`.
+* Stock `cr6b`: `startAddr=0x80A00000`, `burnAddr=0x00040000`, `len=0x271402`.
+* Boot code copies `len` bytes from `cr6b + 0x10` to `startAddr` and jumps there.
+* Stock first-stage loader is position-dependent code linked for `0x80A00000`;
+  it decompresses the kernel to `0x80000000` and keeps its heap at `0x80C70000`.
+* A candidate whose loader is linked for a different address faults with
+  `Undefined Exception happen.` before producing any loader output.
+* See `docs/entry-contract.md`; check candidates with
+  `tools/verify_a2004mu_entry_contract.py`.
 
 ## Partially Known
 
