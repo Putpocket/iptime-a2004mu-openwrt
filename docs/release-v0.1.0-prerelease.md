@@ -1,5 +1,14 @@
 # v0.1.0 prerelease / v0.1.0 사전 공개판
 
+## Downloads / 다운로드
+
+- **First install from stock firmware / 정품 펌웨어에서 처음 설치:**
+  [`a2004mu-openwrt-factory.bin`](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/a2004mu-openwrt-factory.bin)
+- **Upgrade from OpenWrt / OpenWrt에서 업데이트:**
+  [`a2004mu-openwrt-sysupgrade.bin`](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/a2004mu-openwrt-sysupgrade.bin)
+- **Checksums / 체크섬:**
+  [`SHA256SUMS`](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/SHA256SUMS)
+
 ## English
 
 This is an unofficial prerelease build for the ipTIME A2004MU only. Keep UART
@@ -9,13 +18,13 @@ ipTIME, or Realtek.
 
 ### Assets
 
-- `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-sysupgrade.bin`
+- `a2004mu-openwrt-sysupgrade.bin`
   - size: 7,864,592 bytes
   - SHA-256:
     `f13cf20f0f8f89b898a610f12adc305f10dde89709f623a6805b01849f11b8f4`
   - hardware-tested with erased-overlay first boot and a subsequent normal
     reboot
-- `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory.bin`
+- `a2004mu-openwrt-factory.bin`
   - size: 8,126,464 bytes
   - SHA-256:
     `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`
@@ -26,7 +35,7 @@ ipTIME, or Realtek.
 For sysupgrade, first run:
 
 ```sh
-sysupgrade -n --test /tmp/openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-sysupgrade.bin
+sysupgrade -n --test /tmp/a2004mu-openwrt-sysupgrade.bin
 ```
 
 Proceed only if the test passes, and use `sysupgrade -n`. Preserving settings
@@ -68,12 +77,12 @@ Wi-Fi firmware redistribution license are all included in the repository.
 
 ### 첨부 파일
 
-- `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-sysupgrade.bin`
+- `a2004mu-openwrt-sysupgrade.bin`
   - 크기: 7,864,592바이트
   - SHA-256:
     `f13cf20f0f8f89b898a610f12adc305f10dde89709f623a6805b01849f11b8f4`
   - overlay를 지운 첫 부팅과 이후 일반 재부팅까지 하드웨어 시험 완료
-- `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory.bin`
+- `a2004mu-openwrt-factory.bin`
   - 크기: 8,126,464바이트
   - SHA-256:
     `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`
@@ -83,7 +92,7 @@ Wi-Fi firmware redistribution license are all included in the repository.
 sysupgrade 전에는 먼저 다음 명령을 실행하십시오.
 
 ```sh
-sysupgrade -n --test /tmp/openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-sysupgrade.bin
+sysupgrade -n --test /tmp/a2004mu-openwrt-sysupgrade.bin
 ```
 
 검사가 통과한 경우에만 `sysupgrade -n`으로 진행하십시오. 설정 보존

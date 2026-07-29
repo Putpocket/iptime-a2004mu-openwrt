@@ -9,6 +9,19 @@ build configuration, research notes, and independently written analysis tools.
 It intentionally does not contain firmware images, stock firmware, extracted
 filesystems, Realtek SDK source, or device calibration data.
 
+## Download
+
+- **First install from ipTIME stock firmware:**
+  [download `a2004mu-openwrt-factory.bin`](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/a2004mu-openwrt-factory.bin)
+- **Upgrade an existing OpenWrt installation:**
+  [download `a2004mu-openwrt-sysupgrade.bin`](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/a2004mu-openwrt-sysupgrade.bin)
+- **Verify downloads:**
+  [download `SHA256SUMS`](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/SHA256SUMS)
+
+Read the installation warnings below before flashing. The factory image is for
+the stock web upgrader; the sysupgrade image is only for a router already
+running OpenWrt.
+
 ## Verified hardware state
 
 The pre-publication test build has booted on an A2004MU with:
@@ -70,7 +83,7 @@ and hardware revision is not guaranteed, so keep a serial/recovery path
 available.
 
 1. Download
-   `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory.bin`
+   `a2004mu-openwrt-factory.bin`
    from the prerelease.
 2. Verify its SHA-256:
    `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`.
@@ -128,6 +141,19 @@ handoff records are ignored and must remain outside Git history.
 ---
 
 # ipTIME A2004MU OpenWrt 지원
+
+## 다운로드
+
+- **ipTIME 정품 펌웨어에서 처음 설치:**
+  [`a2004mu-openwrt-factory.bin` 다운로드](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/a2004mu-openwrt-factory.bin)
+- **이미 설치된 OpenWrt 업데이트:**
+  [`a2004mu-openwrt-sysupgrade.bin` 다운로드](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/a2004mu-openwrt-sysupgrade.bin)
+- **다운로드 파일 검증:**
+  [`SHA256SUMS` 다운로드](https://github.com/Putpocket/iptime-a2004mu-openwrt/releases/download/v0.1.0/SHA256SUMS)
+
+플래시하기 전에 아래 설치 주의사항을 읽으십시오. factory 이미지는 정품
+웹 업그레이드 전용이고, sysupgrade 이미지는 이미 OpenWrt가 설치된
+공유기에서만 사용합니다.
 
 이 저장소는 Realtek RTL8197F 기반 ipTIME A2004MU를 위한 비공식 OpenWrt
 포트입니다. OpenWrt, ipTIME 또는 Realtek이 보증하거나 후원하는 프로젝트가
@@ -201,7 +227,7 @@ factory 이미지는 오프라인 구조 검사는 통과했지만, 이 정확�
 준비하십시오.
 
 1. 사전 공개 릴리스에서
-   `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory.bin`을
+   `a2004mu-openwrt-factory.bin`을
    내려받습니다.
 2. SHA-256이
    `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`인지
