@@ -11,7 +11,9 @@ Current operational documents:
 - `release-v0.1.0-prerelease.md` (bilingual release warnings and checksums)
 - `clean-room-policy.md` (historical filename; now the provenance policy)
 
-The remaining documents are chronological research and bring-up records. They
-preserve earlier unknowns, failed approaches, and provisional terminology, so
-statements such as “not yet hardware-tested” describe the point in time when
-the note was written rather than the current port.
+Technical reference documents:
+
+- `hardware.md`
+- `stock-firmware.md`
+- `image-format-notes.md`
+- `entry-contract.md`

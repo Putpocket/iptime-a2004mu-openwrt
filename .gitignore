@@ -25,13 +25,9 @@ tmp/
 logs/
 __pycache__/
 *.py[cod]
-*.pyc
 *.log
 *.tmp
 *.bak
-/node_modules/
-/package.json
-/package-lock.json
 
 # OS/editor junk
 .DS_Store
@@ -39,8 +35,3 @@ Thumbs.db
 
 # Windows alternate data stream files
 *:Zone.Identifier
-
-# Private work records and AI handoff material
-/turn.md
-/docs/AI_HANDOFF.md
-/docs/ai-history/
