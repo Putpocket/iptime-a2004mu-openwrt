@@ -8,7 +8,7 @@ Current operational documents:
 - `building.md`
 - `performance.md`
 - `provenance-and-licensing.md`
-- `release-v0.1.0-prerelease.md` (bilingual release warnings and checksums)
+- `release-v0.1.0.md` (bilingual release warnings and checksums)
 - `clean-room-policy.md` (historical filename; now the provenance policy)
 
 Technical reference documents:

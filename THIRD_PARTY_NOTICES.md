@@ -2,9 +2,9 @@
 
 Git history contains a patch against OpenWrt and build metadata, not a complete
 OpenWrt source tree, stock firmware, SDK tree, or built firmware image.
-Prerelease images may be distributed separately as GitHub release assets. Such
-a release must point to the corresponding source revision and retain the
-notices below.
+Firmware images may be distributed separately as GitHub release assets. Such a
+release must point to the corresponding source revision and retain the notices
+below.
 
 - OpenWrt is GPL-2.0-only at the buildsystem level; additional licenses apply
   to individual components.

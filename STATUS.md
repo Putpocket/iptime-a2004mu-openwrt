@@ -4,12 +4,12 @@ Last reviewed: 2026-07-29
 
 ## Publication decision
 
-Ready for public source review and an explicitly identified prerelease build,
-with the SDK provenance disclosure, GPL source offer, third-party notices, and
-Realtek Wi-Fi firmware license retained. The sysupgrade image below passed the
-listed hardware tests. The current factory wrapper passed offline structural
-checks but has not been installed from stock firmware after the final
-late-init change, so it must remain clearly marked unverified.
+Ready for public source review and a release build, with the SDK provenance
+disclosure, GPL source offer, third-party notices, and Realtek Wi-Fi firmware
+license retained. The sysupgrade image below passed the listed hardware tests.
+The current factory wrapper passed offline structural checks but has not been
+installed from stock firmware after the final late-init change, so it must
+remain clearly marked unverified.
 
 ## Last hardware-tested build
 

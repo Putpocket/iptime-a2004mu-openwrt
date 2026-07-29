@@ -71,8 +71,7 @@ are recorded in [STATUS.md](STATUS.md). Do not treat the factory wrapper as a
 universal installer.
 
 The current bilingual release notes, exact filenames, checksums, and recovery
-warnings are in
-[docs/release-v0.1.0-prerelease.md](docs/release-v0.1.0-prerelease.md).
+warnings are in [docs/release-v0.1.0.md](docs/release-v0.1.0.md).
 
 ## First install from stock firmware
 
@@ -84,7 +83,7 @@ available.
 
 1. Download
    `a2004mu-openwrt-factory.bin`
-   from the prerelease.
+   from the release.
 2. Verify its SHA-256:
    `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`.
 3. Connect the computer to a LAN port by cable and open the current ipTIME
@@ -215,8 +214,7 @@ sysupgrade -n --test /tmp/IMAGE.bin
 해시와 일치하는지 확인하십시오. factory wrapper는 현재 오프라인 구조
 검사만 통과한 미검증 이미지이며 범용 설치 이미지가 아닙니다.
 현재 릴리스의 영문·한국어 안내, 정확한 파일명, 체크섬과 복구 주의사항은
-[docs/release-v0.1.0-prerelease.md](docs/release-v0.1.0-prerelease.md)에
-있습니다.
+[docs/release-v0.1.0.md](docs/release-v0.1.0.md)에 있습니다.
 
 ## 정품 펌웨어에서 처음 설치
 
@@ -226,7 +224,7 @@ factory 이미지는 오프라인 구조 검사는 통과했지만, 이 정확�
 하드웨어 리비전의 호환성을 보장하지 않으므로 UART 또는 복구 수단을
 준비하십시오.
 
-1. 사전 공개 릴리스에서
+1. 릴리스에서
    `a2004mu-openwrt-factory.bin`을
    내려받습니다.
 2. SHA-256이

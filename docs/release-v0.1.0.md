@@ -1,4 +1,4 @@
-# v0.1.0 prerelease / v0.1.0 사전 공개판
+# A2004MU OpenWrt v0.1.0
 
 ## Downloads / 다운로드
 
@@ -11,7 +11,7 @@
 
 ## English
 
-This is an unofficial prerelease build for the ipTIME A2004MU only. Keep UART
+This is an unofficial build for the ipTIME A2004MU only. Keep UART
 recovery available. Back up the stock firmware and device-specific data before
 writing flash. This project is not affiliated with or endorsed by OpenWrt,
 ipTIME, or Realtek.
@@ -70,7 +70,7 @@ Wi-Fi firmware redistribution license are all included in the repository.
 
 ## 한국어
 
-이 릴리스는 ipTIME A2004MU 전용 비공식 사전 공개 빌드입니다. 플래시를
+이 릴리스는 ipTIME A2004MU 전용 비공식 빌드입니다. 플래시를
 쓰기 전에 UART 복구 수단을 준비하고 정품 펌웨어 및 기기별 데이터를
 백업하십시오. 이 프로젝트는 OpenWrt, ipTIME 또는 Realtek이 보증하거나
 후원하지 않습니다.
