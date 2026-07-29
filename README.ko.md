@@ -2,9 +2,9 @@
 
 [English README](README.md)
 
-이 저장소는 Realtek RTL8197F 기반 ipTIME A2004MU를 위한 비공식·실험적
-OpenWrt 포트입니다. OpenWrt, ipTIME 또는 Realtek이 보증하거나 후원하는
-프로젝트가 아닙니다.
+이 저장소는 Realtek RTL8197F 기반 ipTIME A2004MU를 위한 비공식 OpenWrt
+포트입니다. OpenWrt, ipTIME 또는 Realtek이 보증하거나 후원하는 프로젝트가
+아닙니다.
 
 저장소에는 OpenWrt 기준 리비전, 단일 통합 패치, 빌드 설정, 조사 문서와
 독립적으로 작성된 분석 도구가 들어 있습니다. 정품 펌웨어, 추출된
@@ -60,9 +60,9 @@ sysupgrade -n --test /tmp/IMAGE.bin
 
 릴리스에 sysupgrade 이미지가 첨부된다면 [STATUS.md](STATUS.md)에 기록된
 해시와 일치하는지 확인하십시오. 정품 15.365용 factory wrapper는 현재
-오프라인 구조 검사만 통과한 실험적 이미지이며 범용 설치 이미지가 아닙니다.
+오프라인 구조 검사만 통과한 미검증 이미지이며 범용 설치 이미지가 아닙니다.
 현재 릴리스의 영문·한국어 안내, 정확한 파일명, 체크섬과 복구 주의사항은
-[docs/release-v0.1.0-experimental.md](docs/release-v0.1.0-experimental.md)에
+[docs/release-v0.1.0-prerelease.md](docs/release-v0.1.0-prerelease.md)에
 있습니다.
 
 ## 소스와 라이선스

@@ -2,9 +2,9 @@
 
 [한국어 README](README.ko.md)
 
-This is an unofficial, experimental port of OpenWrt to the ipTIME A2004MU
-(Realtek RTL8197F). It is not affiliated with or endorsed by OpenWrt, ipTIME,
-or Realtek.
+This is an unofficial port of OpenWrt to the ipTIME A2004MU (Realtek
+RTL8197F). It is not affiliated with or endorsed by OpenWrt, ipTIME, or
+Realtek.
 
 The repository contains one source patch, the exact OpenWrt base revision and
 build configuration, research notes, and independently written analysis tools.
@@ -61,7 +61,7 @@ universal installer.
 
 The current bilingual release notes, exact filenames, checksums, and recovery
 warnings are in
-[docs/release-v0.1.0-experimental.md](docs/release-v0.1.0-experimental.md).
+[docs/release-v0.1.0-prerelease.md](docs/release-v0.1.0-prerelease.md).
 
 ## Source and licensing
 

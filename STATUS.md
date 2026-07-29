@@ -4,12 +4,12 @@ Last reviewed: 2026-07-29
 
 ## Publication decision
 
-Ready for public source review and an explicitly experimental binary release,
+Ready for public source review and an explicitly identified prerelease build,
 with the SDK provenance disclosure, GPL source offer, third-party notices, and
 Realtek Wi-Fi firmware license retained. The sysupgrade image below passed the
 listed hardware tests. The current factory wrapper passed offline structural
 checks but has not been installed from stock firmware after the final
-late-init change, so it must remain clearly marked experimental.
+late-init change, so it must remain clearly marked unverified.
 
 ## Last hardware-tested build
 
@@ -76,4 +76,5 @@ hardware-tested installation image.
 - Do not restore KALLSYMS without rechecking the 2,816 KiB kernel partition.
 - Do not enable speculative HWNAT code from the vendor SDK.
 - The factory image path is device- and stock-version-sensitive. Treat it as
-  recovery-capable experimental software, not a universal installer.
+  an unverified installation path that requires recovery capability, not a
+  universal installer.

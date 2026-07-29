@@ -87,8 +87,8 @@ public code review under GPL-2.0-only:
 - exact normalized-line comparisons found no substantive SDK source line in
   the new Ethernet or SPI implementations.
 
-An experimental firmware image may be published separately from Git history
-when its exact corresponding patch, OpenWrt base revision, build configuration,
+A prerelease firmware image may be published separately from Git history when
+its exact corresponding patch, OpenWrt base revision, build configuration,
 build instructions, checksums, and applicable notices are published together.
 The redistributable Realtek Wi-Fi firmware license must remain available with
 that distribution. The current sysupgrade image has hardware regression
