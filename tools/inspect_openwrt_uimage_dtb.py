@@ -9,7 +9,6 @@ import lzma
 import shutil
 import struct
 import subprocess
-from glob import glob
 from pathlib import Path
 
 
@@ -63,9 +62,6 @@ def decompress_payload(payload: bytes, compression: int) -> bytes:
 
 def decompile_dtb(dtb: Path, dts: Path) -> bool:
     dtc = shutil.which("dtc")
-    if not dtc:
-        candidates = sorted(glob("/home/user/openwrt/build_dir/target-*/linux-*/linux-*/scripts/dtc/dtc"))
-        dtc = candidates[0] if candidates else None
     if not dtc:
         return False
     subprocess.run(

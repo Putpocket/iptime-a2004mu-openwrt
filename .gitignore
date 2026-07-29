@@ -16,6 +16,7 @@ rootfs-*/
 squashfs-root/
 _extract/
 license-audit/
+/artifacts/
 
 # Generated outputs and temporary files
 build/
@@ -28,6 +29,9 @@ __pycache__/
 *.log
 *.tmp
 *.bak
+/node_modules/
+/package.json
+/package-lock.json
 
 # OS/editor junk
 .DS_Store
@@ -35,3 +39,8 @@ Thumbs.db
 
 # Windows alternate data stream files
 *:Zone.Identifier
+
+# Private work records and AI handoff material
+/turn.md
+/docs/AI_HANDOFF.md
+/docs/ai-history/

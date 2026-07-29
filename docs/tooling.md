@@ -42,7 +42,7 @@ substitute for clean-room OpenWrt support.
 | Tool | Role |
 | --- | --- |
 | `scripts/check_repo_safety.sh` | Checks for forbidden binary artifacts, extracted rootfs directories, and large files. |
-| `scripts/check_clean_room_boundaries.sh` | Checks for SDK/vendor/generated artifacts and clean-room boundary violations. |
+| `scripts/check_provenance_boundaries.sh` | Checks for SDK/vendor/generated artifacts and provenance boundary violations. |
 
 Run both before publishing or committing:
 

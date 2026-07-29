@@ -1,0 +1,12 @@
+This repository's original material is provided under:
+
+	SPDX-License-Identifier: GPL-2.0-only
+
+under the terms of the GNU General Public License version 2 only. A copy is
+included in `LICENSES/GPL-2.0` and is also available at:
+
+	https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+
+Files represented by the OpenWrt patch remain subject to their own copyright
+and file-level license notices. Additional licenses may apply to packages and
+firmware selected by the build configuration.

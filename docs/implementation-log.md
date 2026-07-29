@@ -2,7 +2,7 @@
 
 ## RTL8197F Scaffold Branch
 
-* OpenWrt source tree: `/home/user/openwrt`
+* OpenWrt source tree: local working tree
 * Branch: `a2004mu-rtl8197f-scaffold`
 * Purpose: first clean-room scaffold for RTL8197F platform investigation
 * Status: not build-validated, not hardware-validated

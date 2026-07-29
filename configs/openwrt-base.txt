@@ -1,0 +1,3 @@
+repository=https://git.openwrt.org/openwrt/openwrt.git
+commit=6e9fd1c3ba6bf486a044ed9d640a77dd50b6cbc2
+tested_build_version=r35121+23-6e9fd1c3ba

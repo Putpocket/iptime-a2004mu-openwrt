@@ -9,8 +9,8 @@ stock logs, firmware metadata, OpenWrt inventory, and upstream Linux inventory.
 ## Current Evidence
 
 * A2004MU uses RTL8197F.
-* OpenWrt tree `/home/user/openwrt` has no direct A2004MU or RTL8197F support.
-* Upstream Linux tree `/home/user/linux` has no direct RTL8197F or `rtkmipsel`
+* The inspected OpenWrt tree had no direct A2004MU or RTL8197F support.
+* The inspected upstream Linux tree had no direct RTL8197F or `rtkmipsel`
   support found in the searched areas.
 * Upstream Linux has a Realtek MIPS platform path for RTL838x/RTL839x-style
   machines and DTS examples for RTL838x/RTL930x.
