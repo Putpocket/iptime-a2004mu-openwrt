@@ -3306,7 +3306,7 @@ index 0000000000000000000000000000000000000000..984042b4696d890e9ef31c01e208d053
 +		--output "$@.new" \
 +		--report "$@.UNTESTED.txt"
 +	mv "$@.new" "$@"
-+	cp "$@.UNTESTED.txt" "$(BIN_DIR)/$(DEVICE_IMG_PREFIX)-factory_15_365.bin.UNTESTED.txt"
++	cp "$@.UNTESTED.txt" "$(BIN_DIR)/$(DEVICE_IMG_PREFIX)-factory.bin.UNTESTED.txt"
 +endef
 +
 +define Build/a2004m-sysupgrade
@@ -3332,10 +3332,10 @@ index 0000000000000000000000000000000000000000..984042b4696d890e9ef31c01e208d053
 +  KERNEL_SIZE := 2816k
 +  KERNEL := kernel-bin | append-dtb | lzma | loader-kernel
 +  DEVICE_PACKAGES := dnsmasq
-+  IMAGES := sysupgrade.bin factory_15_365.bin
++  IMAGES := sysupgrade.bin factory.bin
 +  IMAGE/sysupgrade.bin := append-kernel | pad-to $$(KERNEL_SIZE) | \
 +	append-rootfs | check-size | a2004m-sysupgrade | append-metadata
-+  IMAGE/factory_15_365.bin := append-kernel | pad-to $$(KERNEL_SIZE) | \
++  IMAGE/factory.bin := append-kernel | pad-to $$(KERNEL_SIZE) | \
 +	append-rootfs | check-size | a2004m-factory
 +  DEFAULT := n
 +endef

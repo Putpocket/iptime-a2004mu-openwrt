@@ -61,6 +61,38 @@ The current bilingual release notes, exact filenames, checksums, and recovery
 warnings are in
 [docs/release-v0.1.0-prerelease.md](docs/release-v0.1.0-prerelease.md).
 
+## First install from stock firmware
+
+This path is only for an ipTIME A2004MU running stock firmware. The exact final
+factory image passed offline structural checks but has not yet been
+reinstalled through the stock web UI. Compatibility with every stock version
+and hardware revision is not guaranteed, so keep a serial/recovery path
+available.
+
+1. Download
+   `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory.bin`
+   from the prerelease.
+2. Verify its SHA-256:
+   `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`.
+3. Connect the computer to a LAN port by cable and open the current ipTIME
+   administration page.
+4. Open the manual firmware-upgrade page and select the factory file. Do not
+   select the sysupgrade file.
+5. Start the upgrade and do not disconnect power. The page may appear
+   unchanged and UART may remain quiet while the stock firmware validates and
+   writes the image. Wait for the router to reboot; do not assume that silence
+   means the process has stopped.
+6. After reboot, renew the computer's DHCP lease. OpenWrt uses
+   `192.168.1.1`; if DHCP does not return promptly, temporarily use
+   `192.168.1.2/24` on the wired adapter and test `ping 192.168.1.1`.
+7. Connect with `ssh root@192.168.1.1` and set a root password immediately
+   with `passwd`.
+
+The image does not include LuCI. Wi-Fi is disabled by default, so first access
+must be through a wired LAN port. For later OpenWrt updates, use the sysupgrade
+image with `sysupgrade -n --test` followed by `sysupgrade -n`; do not upload
+the factory file from OpenWrt.
+
 ## Source and licensing
 
 The repository's original material is offered under GPL-2.0-only unless a file
@@ -154,11 +186,45 @@ sysupgrade -n --test /tmp/IMAGE.bin
 ```
 
 릴리스에 sysupgrade 이미지가 첨부된다면 [STATUS.md](STATUS.md)에 기록된
-해시와 일치하는지 확인하십시오. 정품 15.365용 factory wrapper는 현재
-오프라인 구조 검사만 통과한 미검증 이미지이며 범용 설치 이미지가 아닙니다.
+해시와 일치하는지 확인하십시오. factory wrapper는 현재 오프라인 구조
+검사만 통과한 미검증 이미지이며 범용 설치 이미지가 아닙니다.
 현재 릴리스의 영문·한국어 안내, 정확한 파일명, 체크섬과 복구 주의사항은
 [docs/release-v0.1.0-prerelease.md](docs/release-v0.1.0-prerelease.md)에
 있습니다.
+
+## 정품 펌웨어에서 처음 설치
+
+이 방법은 정품 펌웨어를 사용하는 ipTIME A2004MU 전용입니다. 현재 최종
+factory 이미지는 오프라인 구조 검사는 통과했지만, 이 정확한 파일을 정품
+웹 UI에서 다시 설치하는 최종 시험은 아직 하지 않았습니다. 모든 정품 버전과
+하드웨어 리비전의 호환성을 보장하지 않으므로 UART 또는 복구 수단을
+준비하십시오.
+
+1. 사전 공개 릴리스에서
+   `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory.bin`을
+   내려받습니다.
+2. SHA-256이
+   `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`인지
+   확인합니다.
+3. PC를 공유기 LAN 포트에 유선으로 연결하고 현재 ipTIME 관리 페이지에
+   접속합니다.
+4. 수동 펌웨어 업그레이드 메뉴에서 factory 파일을 선택합니다.
+   sysupgrade 파일을 선택하면 안 됩니다.
+5. 업그레이드를 시작한 뒤 전원을 끊지 마십시오. 정품 펌웨어가 이미지를
+   검증하고 기록하는 동안 화면이 그대로이거나 UART 출력이 없을 수
+   있습니다. 아무 출력이 없다는 이유로 중단하지 말고 공유기가 스스로
+   재부팅할 때까지 기다립니다.
+6. 재부팅 후 PC의 DHCP 주소를 갱신합니다. OpenWrt 주소는
+   `192.168.1.1`입니다. DHCP가 바로 잡히지 않으면 유선 어댑터에
+   `192.168.1.2/24`를 임시로 설정하고 `ping 192.168.1.1`을 확인합니다.
+7. `ssh root@192.168.1.1`로 접속하고 `passwd`로 root 비밀번호를 즉시
+   설정합니다.
+
+이 이미지에는 LuCI가 포함되지 않습니다. Wi-Fi도 기본적으로 꺼져 있으므로
+최초 접속은 반드시 유선 LAN으로 해야 합니다. 이후 OpenWrt 업데이트에는
+sysupgrade 이미지를 사용해 `sysupgrade -n --test`를 먼저 실행한 뒤
+`sysupgrade -n`으로 설치하십시오. OpenWrt에서 factory 파일을 올리면
+안 됩니다.
 
 ## 소스와 라이선스
 

@@ -35,7 +35,7 @@ env PATH="$PWD/staging_dir/host/bin:$PWD/staging_dir/toolchain-mipsel_24kc_gcc-1
 
 Expected outputs are under `bin/targets/rtl819x/rtl8197f/`:
 
-- `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory_15_365.bin`
+- `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-factory.bin`
 - `openwrt-rtl819x-rtl8197f-iptime_a2004mu-squashfs-sysupgrade.bin`
 
 ## Validation

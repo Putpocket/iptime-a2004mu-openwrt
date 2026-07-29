@@ -30,7 +30,7 @@ late-init change, so it must remain clearly marked unverified.
 - sysupgrade size: `7,864,592` bytes
 - sysupgrade SHA-256:
   `f13cf20f0f8f89b898a610f12adc305f10dde89709f623a6805b01849f11b8f4`
-- stock-15.365 factory size: `8,126,464` bytes
+- factory size: `8,126,464` bytes
 - factory SHA-256:
   `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`
 
@@ -58,8 +58,8 @@ hardware-tested installation image.
 
 ## Remaining release gates
 
-1. Install the final factory wrapper through stock 15.365 with UART recovery
-   available; its current validation is offline only.
+1. Install the final factory wrapper through the stock web UI with UART
+   recovery available; its current validation is offline only.
 2. Repeat wired stress and all five physical port tests on the final hash.
 3. Test a real 5 GHz client with WPA2/WPA3 and measure throughput.
 4. Measure LAN-to-LAN and WAN-to-LAN forwarding with two independent endpoints.
