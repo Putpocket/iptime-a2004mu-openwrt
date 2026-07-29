@@ -8,7 +8,7 @@
 
 ## OpenWrt Tree
 
-* Path: `/home/user/openwrt`
+* Path: local OpenWrt source tree
 * HEAD: `6e9fd1c3ba elfutils: update to 0.195`
 * Status: clean
 
@@ -42,7 +42,7 @@ compatibility with RTL8197F.
 
 ## Keyword Search Summary
 
-Searches were run read-only against `/home/user/openwrt` under `target/linux`,
+Searches were run read-only against the local OpenWrt tree under `target/linux`,
 `package/kernel`, and `include`.
 
 Direct platform keywords:
@@ -79,13 +79,13 @@ supported. The A2004MU MAC, switch, and PHY path remains unconfirmed.
 An upstream Linux source tree was prepared outside this repository and inspected
 read-only.
 
-* Path: `/home/user/linux`
+* Path: local upstream Linux source tree
 * HEAD: `0716f9b9338a Merge tag 'ntb-7.2' of https://github.com/jonmason/ntb`
 * Status: clean
 
 ## Upstream Linux Inventory
 
-Searches were run read-only against `/home/user/linux`, mainly under
+Searches were run read-only against the local upstream Linux tree, mainly under
 `arch/mips`, `drivers`, and `include`.
 
 Direct platform keywords:

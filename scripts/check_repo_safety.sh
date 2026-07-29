@@ -6,51 +6,40 @@ cd "$repo_root"
 
 status=0
 
+mapfile -d '' candidates < <(
+  git ls-files --cached --others --exclude-standard -z
+)
+
 echo "Checking for forbidden firmware/binary artifacts..."
 
-while IFS= read -r path; do
+for path in "${candidates[@]}"; do
   case "$path" in
-    ./.git/*) continue ;;
+    *.bin|*.img|*.fw|*.trx|*.ko|*.so|*.squashfs)
+      echo "forbidden file: $path"
+      status=1
+      ;;
   esac
-  echo "forbidden file: ${path#./}"
-  status=1
-done < <(
-  find . -path './.git' -prune -o -type f \( \
-    -name '*.bin' -o \
-    -name '*.img' -o \
-    -name '*.fw' -o \
-    -name '*.trx' -o \
-    -name '*.ko' -o \
-    -name '*.so' -o \
-    -name '*.squashfs' \
-  \) -print
-)
+done
 
 echo "Checking for rootfs/squashfs extraction directories..."
 
-while IFS= read -r path; do
+for path in "${candidates[@]}"; do
   case "$path" in
-    ./.git/*) continue ;;
+    extracted-rootfs/*|rootfs-*/*|*/rootfs-*/*|squashfs-root/*|*/squashfs-root/*)
+      echo "forbidden extraction path: $path"
+      status=1
+      ;;
   esac
-  echo "forbidden directory: ${path#./}"
-  status=1
-done < <(
-  find . -path './.git' -prune -o -type d \( \
-    -name 'extracted-rootfs' -o \
-    -name 'rootfs-*' -o \
-    -name 'squashfs-root' \
-  \) -print
-)
+done
 
 echo "Checking for files larger than 10MB..."
 
-while IFS= read -r path; do
-  case "$path" in
-    ./.git/*) continue ;;
-  esac
-  echo "large file over 10MB: ${path#./}"
-  status=1
-done < <(find . -path './.git' -prune -o -type f -size +10M -print)
+for path in "${candidates[@]}"; do
+  if [ -f "$path" ] && [ "$(stat -c %s "$path")" -gt 10485760 ]; then
+    echo "large file over 10MB: $path"
+    status=1
+  fi
+done
 
 if [ "$status" -ne 0 ]; then
   echo "Repository safety check failed."

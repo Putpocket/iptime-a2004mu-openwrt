@@ -1,36 +1,42 @@
-# Clean-room Policy
+# Reference and provenance policy
 
-This repository targets clean-room OpenWrt support for ipTIME A2004MU.
+The historical filename is retained for links, but this project does not claim
+a formal two-team clean-room implementation.
 
-## SDK Role
+## Reference sources
 
-The Realtek SDK is reference-only. It may be used to understand observed device
-behavior, boot logs, memory layout, image layout, and hardware structure. It
-must not be copied into OpenWrt target, driver, DTS, package, or board support
-code.
+Implementation may be informed by:
 
-## Allowed Evidence
+- UART and network captures;
+- read-only register observations on owned hardware;
+- stock firmware behavior and independently produced disassembly notes;
+- public Linux and OpenWrt source;
+- public datasheets;
+- Realtek SDK files that expressly grant redistribution/modification rights,
+  with their role and file-level license documented.
 
-* UART logs
-* Stock boot facts
-* Hardware observations
-* Public datasheets, if available
-* Public Linux and OpenWrt APIs
-* Independently written code
-* Independently written notes, scripts, metadata, and patch plans
+## Rules
 
-## Disallowed Material
+- Do not copy or publish the Realtek SDK tree.
+- Do not copy code from SDK files marked proprietary, confidential, or
+  `All Rights Reserved` without an explicit redistribution grant.
+- Preserve copyright and license notices when code is derived from a licensed
+  source.
+- Prefer Linux/OpenWrt interfaces and independently structured drivers over
+  vendor APIs.
+- Record when a register value, descriptor layout, or sequence came from SDK
+  inspection, stock observation, or public upstream source.
+- Do not claim independence that the development history cannot demonstrate.
 
-* Copying SDK driver files
-* Importing SDK binary blobs
-* Committing extracted rootfs contents
-* Committing firmware images
-* Committing generated candidate firmware
-* Committing `.ko`, `.so`, or other vendor binaries
-* Treating SDK `AP-fw` as mainline OpenWrt
+## Material excluded from Git
 
-## Documentation Rule
+- stock and generated firmware images;
+- SDK binaries and source trees;
+- extracted root filesystems;
+- device-unique MAC addresses, calibration bytes, keys, and credentials;
+- `.ko`, `.so`, and other vendor binaries;
+- private UART logs and AI handoff records.
 
-When a fact comes from an observed log or local image inspection, document it as
-evidence. When code is implemented, keep it independently written and grounded
-in public Linux/OpenWrt interfaces or directly observed hardware behavior.
+`scripts/check_provenance_boundaries.sh` enforces only basic repository
+boundaries. It cannot determine copyrightability, derivation, or license
+compatibility.

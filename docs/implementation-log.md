@@ -2,7 +2,7 @@
 
 ## RTL8197F Scaffold Branch
 
-* OpenWrt source tree: `/home/user/openwrt`
+* OpenWrt source tree: local working tree
 * Branch: `a2004mu-rtl8197f-scaffold`
 * Purpose: first clean-room scaffold for RTL8197F platform investigation
 * Status: not build-validated, not hardware-validated
@@ -131,3 +131,14 @@ platform base before connecting a board DTS or image recipe.
   driver references, but no SDK/vendor Ethernet source was imported. Wired LAN
   and SSH remain blocked until a clean-room RTL8197F Ethernet/switch path is
   defined.
+* Created the RTL8197F watchdog clean-room plan. No OpenWrt code was changed,
+  no firmware/image build was performed, and no hardware validation was
+  performed.
+* Created the RTL8197F Ethernet clean-room plan. No OpenWrt code was changed,
+  no firmware/image build was performed, and no hardware validation was
+  performed.
+* Applied a compile-only workaround for unresolved `REALTEK_OTTO_WDT` and used
+  the existing realtek early-printk config pattern; `target/linux/compile`
+  passed. No firmware/sysupgrade/factory image build or hardware validation was
+  performed.
+* Enabled the minimal A2004MU default OpenWrt image path with `IMAGE_SIZE := 8192k`; `target/linux/install` passed and produced default OpenWrt initramfs/sysupgrade artifacts, but no ipTIME web-admin wrapper/factory image or hardware validation was performed.

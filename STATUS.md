@@ -1,77 +1,79 @@
 # Status
 
-This repository is for GitHub-safe ipTIME A2004MU / Realtek RTL8197F OpenWrt
-porting research. The primary path is now a latest/official-style OpenWrt port
-implemented clean-room.
+Last reviewed: 2026-07-29
 
-It does not provide a flash-verified OpenWrt image.
+## Publication decision
 
-## Current Direction
+Ready for public source review and an explicitly experimental binary release,
+with the SDK provenance disclosure, GPL source offer, third-party notices, and
+Realtek Wi-Fi firmware license retained. The sysupgrade image below passed the
+listed hardware tests. The current factory wrapper passed offline structural
+checks but has not been installed from stock firmware after the final
+late-init change, so it must remain clearly marked experimental.
 
-* Mainline OpenWrt port: not completed.
-* Current priority: latest OpenWrt clean-room porting work.
-* First target: kernel boot, rootfs mount, wired LAN, and SSH.
-* Wi-Fi: out of the first bring-up unless a clean driver path is confirmed.
-* SDK wrapper candidate: experimental side path only.
-* No flash-verified OpenWrt image exists yet.
+## Last hardware-tested build
 
-## Confirmed Evidence
+- OpenWrt base: `6e9fd1c3ba6bf486a044ed9d640a77dd50b6cbc2`
+- reported revision: `r35121+23-6e9fd1c3ba`
+- kernel: `6.18.36`
+- target: `rtl819x/rtl8197f`
+- board: `iptime,a2004mu`
+- sysupgrade size: `7,864,592` bytes
+- sysupgrade SHA-256:
+  `f13cf20f0f8f89b898a610f12adc305f10dde89709f623a6805b01849f11b8f4`
 
-* Device: ipTIME A2004MU
-* Board alias: `a2004m`
-* SoC: Realtek RTL8197F
-* DRAM: 64 MB DDR2
-* Flash: 8 MB SPI NOR
-* UART: 38400 8N1
-* Bootloader prompt: `<RealTek>`
-* Stock firmware version 15.352 model field: `a2004m`
-* Stock firmware version 15.352 rootfs offset: `0x2c0000`
-* Stock boot log collected.
-* Stock boot analyzer status: `booted`
-* Stock boot analyzer fatal hints: `0`
-* Stock rootfs mount seen: yes
-* Stock Ethernet evidence seen: yes
-* Stock panic seen: no
-* Stock boot log shows `rtkxxpart` partitions on `m25p80`.
-* Stock boot log shows SquashFS root mounted read-only.
-* Stock boot log shows switch API version `v1.2.12`.
-* Stock boot log shows switch chip id `0x6367-0020`.
-* Stock boot log shows `eth0`, `eth1`, and `peth0` mapped to `eth1`.
-* Local SDK `AP-fw.bin` starts with `cs6c`.
-* Local SDK `AP-fw.bin` SquashFS offset: `0x19c000`.
-* Local SDK `AP-fw.bin` reports `linuxpart=0x40000` and `hwpart=0x20000`.
+## Current source-publication build
 
-## Partially Known
+- build result: PASS
+- clean-base patch apply and `git diff --check`: PASS
+- factory offline arithmetic/self-check: PASS
+- sysupgrade size: `7,864,592` bytes
+- sysupgrade SHA-256:
+  `f13cf20f0f8f89b898a610f12adc305f10dde89709f623a6805b01849f11b8f4`
+- stock-15.365 factory size: `8,126,464` bytes
+- factory SHA-256:
+  `b6eb5c150ff7bf8c35e9f918ed3ded520aacd321edc1ff13e50b409f0ad5ff55`
 
-* Hardware facts are partially known from stock firmware, stock boot logs, and
-  board observations.
-* Exact clean-room kernel platform requirements for RTL8197F are not known yet.
-* Ethernet MAC, switch, and PHY support path still needs mainline gap analysis.
-* DTS, image recipe, and OpenWrt board defaults have not been implemented.
+This build removes mac80211 debugfs and mesh support. It also adds an
+A2004MU-only late-init guard that waits for netifd after first-boot JFFS2
+initialization and restarts networking only if the LAN ubus object still does
+not appear. The sysupgrade hash identifies the installed hardware-tested
+image. The factory hash identifies an offline-validated wrapper, not a
+hardware-tested installation image.
 
-## Repository Safety
+## Passed on hardware
 
-The repository should contain only documentation, scripts written from scratch,
-metadata, and workflow notes. Local stock firmware, SDK outputs, extracted
-rootfs contents, generated candidates, and binary blobs stay outside this
-repository under:
+- bootloader validation and normal boot;
+- repeated normal reboot with persistent JFFS2 overlay;
+- DHCP and SSH;
+- LAN1 through LAN4 and WAN link/communication tests at 1 Gbit/s full duplex;
+- interrupt-driven Ethernet receive and transmit;
+- five consecutive 10 MiB transfers with matching hashes;
+- no observed Ethernet FCS, symbol, or discard errors in the stress test;
+- split-MTD `sysupgrade -n`, including full-block pipe handling;
+- erased-overlay first boot after `sysupgrade -n`, without UART intervention;
+- late-init network guard present and no-op when netifd initializes normally;
+- RTL8822BE PCIe discovery, firmware load, NVMEM calibration, and 5 GHz AP
+  start.
 
-```text
-../iptime-a2004mu-local-artifacts/
-```
+## Remaining release gates
 
-Run these before publishing or committing:
+1. Install the final factory wrapper through stock 15.365 with UART recovery
+   available; its current validation is offline only.
+2. Repeat wired stress and all five physical port tests on the final hash.
+3. Test a real 5 GHz client with WPA2/WPA3 and measure throughput.
+4. Measure LAN-to-LAN and WAN-to-LAN forwarding with two independent endpoints.
+5. Resolve whether all register-init tables may be distributed from their
+   documented observation sources; obtain legal review if distributing
+   binaries broadly.
+6. Keep Wi-Fi disabled by default unless a secure first-boot credential design
+   is added.
 
-```sh
-bash scripts/check_repo_safety.sh
-bash scripts/check_clean_room_boundaries.sh
-```
+## Operational warnings
 
-## Current Safe Next Work
-
-* Inventory a latest OpenWrt source tree for existing RTL8197F/Realtek support.
-* Decide target/subtarget strategy.
-* Draft an A2004MU DTS from observed hardware facts.
-* Define flash partitions from stock evidence.
-* Identify a clean Ethernet/switch/PHY support path.
-* Build toward an initramfs-first bring-up with UART logging.
+- Always use `sysupgrade -n --test IMAGE` before `sysupgrade -n IMAGE`.
+- Configuration-preserving sysupgrade is intentionally unsupported.
+- Do not restore KALLSYMS without rechecking the 2,816 KiB kernel partition.
+- Do not enable speculative HWNAT code from the vendor SDK.
+- The factory image path is device- and stock-version-sensitive. Treat it as
+  recovery-capable experimental software, not a universal installer.

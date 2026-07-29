@@ -5,16 +5,16 @@
 OpenWrt source tree was prepared outside this repository and inspected
 read-only.
 
-* Path: `/home/user/openwrt`
+* Path: local OpenWrt source tree
 * Status after inspection: clean
 * HEAD: `6e9fd1c3ba elfutils: update to 0.195`
 
 Searched candidate paths:
 
 * `../openwrt`
-* `/home/user/openwrt`
+* local OpenWrt source tree
 * `../openwrt-mainline`
-* `/home/user/openwrt-mainline`
+* separate upstream comparison tree
 
 ## Target/Linux Inventory
 
@@ -161,7 +161,7 @@ A2004MU/RTL8197F include:
 
 ## Kernel Platform Inventory
 
-Kernel/platform inventory was completed against `/home/user/openwrt` at
+Kernel/platform inventory was completed against the local OpenWrt tree at
 `6e9fd1c3ba`. See [kernel-platform-inventory.md](kernel-platform-inventory.md).
 
 Direct RTL8197F platform support is still not confirmed. The existing
@@ -169,7 +169,7 @@ Direct RTL8197F platform support is still not confirmed. The existing
 but it should not be treated as a confirmed base for A2004MU until platform,
 clock, interrupt, timer, UART, SPI, Ethernet, and switch support are verified.
 
-Upstream Linux inventory was also completed against `/home/user/linux` at
+Upstream Linux inventory was also completed against the local Linux tree at
 `0716f9b9338a`. No direct RTL8197F, `rtkmipsel`, or A2004MU platform base was
 found. The next decision is platform-base placement before target/subtarget or
 DTS-first work. See [platform-decision-notes.md](platform-decision-notes.md).

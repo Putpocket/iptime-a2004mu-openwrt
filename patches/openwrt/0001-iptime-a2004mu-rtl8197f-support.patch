@@ -1,0 +1,4940 @@
+diff --git a/package/base-files/files/etc/board.d/99-default_network b/package/base-files/files/etc/board.d/99-default_network
+index 49d2a3b3544b07ea044097516d32235c7872b24a..bab5377a181364a8436ce7837bde16ada5fa3566 100644
+--- a/package/base-files/files/etc/board.d/99-default_network
++++ b/package/base-files/files/etc/board.d/99-default_network
+@@ -8,8 +8,17 @@ board_config_update
+
+ json_is_a network object && exit 0
+
+-ucidef_set_interface_lan 'eth0'
+-[ -d /sys/class/net/eth1 ] && ucidef_set_interface_wan 'eth1'
++board=$(board_name)
++
++case "$board" in
++iptime,a2004mu)
++	ucidef_set_interfaces_lan_wan "lan1 lan2 lan3 lan4" "wan"
++	;;
++*)
++	ucidef_set_interface_lan 'eth0'
++	[ -d /sys/class/net/eth1 ] && ucidef_set_interface_wan 'eth1'
++	;;
++esac
+
+ board_config_flush
+
+diff --git a/package/kernel/mac80211/patches/rtl/900-rtw88-8822b-add-rtl8197f-calibration.patch b/package/kernel/mac80211/patches/rtl/900-rtw88-8822b-add-rtl8197f-calibration.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f7a25ccaf2fb333810bb596cb896ebbf797a5b6
+--- /dev/null
++++ b/package/kernel/mac80211/patches/rtl/900-rtw88-8822b-add-rtl8197f-calibration.patch
+@@ -0,0 +1,207 @@
++--- a/drivers/net/wireless/realtek/rtw88/main.c
+++++ b/drivers/net/wireless/realtek/rtw88/main.c
++@@ -2301,5 +2301,6 @@ int rtw_register_hw(struct rtw_dev *rtwd
++ #endif
++ 	rtw_set_supported_band(hw, rtwdev->chip);
+++	wiphy_read_of_freq_limits(hw->wiphy);
++ 	SET_IEEE80211_PERM_ADDR(hw, rtwdev->efuse.addr);
++
++ 	hw->wiphy->sar_capa = &rtw_sar_capa;
++--- a/drivers/net/wireless/realtek/rtw88/rtw8822b.c
+++++ b/drivers/net/wireless/realtek/rtw88/rtw8822b.c
++@@ -3,6 +3,7 @@
++ /* Copyright(c) 2018-2019  Realtek Corporation
++  */
++
+++#include <linux/nvmem-consumer.h>
++ #include <linux/module.h>
++ #include "main.h"
++ #include "coex.h"
++@@ -38,10 +39,144 @@ static void rtw8822bs_efuse_parsing(stru
++ 	ether_addr_copy(efuse->addr, map->s.mac_addr);
++ }
++
+++#define RTL8197F_WLAN_CAL_LEN		1600
+++#define RTL8197F_WLAN_MAC		0
+++#define RTL8197F_WLAN_XTAL		149
+++#define RTL8197F_WLAN_THERMAL		152
+++#define RTL8197F_WLAN_5G_BASE_A		163
+++#define RTL8197F_WLAN_5G_BASE_B		359
+++#define RTL8197F_WLAN_5G_HT1_A		1250
+++#define RTL8197F_WLAN_5G_HT2_A		1264
+++#define RTL8197F_WLAN_5G_VHT1_A		1320
+++#define RTL8197F_WLAN_5G_VHT2_A		1334
+++#define RTL8197F_WLAN_5G_HT1_B		1474
+++#define RTL8197F_WLAN_5G_HT2_B		1488
+++#define RTL8197F_WLAN_5G_VHT1_B		1544
+++#define RTL8197F_WLAN_5G_VHT2_B		1558
+++#define RTL8197F_WLAN_5G_GROUPS		14
+++
+++static const u8 rtl8197f_5g_group_channel[RTL8197F_WLAN_5G_GROUPS] = {
+++	36, 44, 52, 60, 100, 108, 116, 124, 132, 140, 149, 157, 165, 173
+++};
+++
+++static s8 rtw8822b_rtl8197f_s4(u8 value)
+++{
+++	value &= 0xf;
+++	return value & BIT(3) ? value - 16 : value;
+++}
+++
+++static s8 rtw8822b_rtl8197f_min_diff(const u8 *cal, unsigned int offset,
+++				      bool high)
+++{
+++	s8 min = 7;
+++	int i;
+++
+++	for (i = 0; i < RTL8197F_WLAN_5G_GROUPS; i++) {
+++		u8 value = high ? cal[offset + i] >> 4 : cal[offset + i];
+++		s8 diff = rtw8822b_rtl8197f_s4(value);
+++
+++		min = min_t(s8, min, diff);
+++	}
+++
+++	return min;
+++}
+++
+++static int rtw8822b_read_rtl8197f_calibration(struct rtw_dev *rtwdev)
+++{
+++	static const unsigned int base_offset[] = {
+++		RTL8197F_WLAN_5G_BASE_A, RTL8197F_WLAN_5G_BASE_B
+++	};
+++	static const unsigned int ht1_offset[] = {
+++		RTL8197F_WLAN_5G_HT1_A, RTL8197F_WLAN_5G_HT1_B
+++	};
+++	static const unsigned int ht2_offset[] = {
+++		RTL8197F_WLAN_5G_HT2_A, RTL8197F_WLAN_5G_HT2_B
+++	};
+++	static const unsigned int vht1_offset[] = {
+++		RTL8197F_WLAN_5G_VHT1_A, RTL8197F_WLAN_5G_VHT1_B
+++	};
+++	static const unsigned int vht2_offset[] = {
+++		RTL8197F_WLAN_5G_VHT2_A, RTL8197F_WLAN_5G_VHT2_B
+++	};
+++	struct rtw_efuse *efuse = &rtwdev->efuse;
+++	struct nvmem_cell *cell;
+++	size_t len;
+++	u8 *cal;
+++	int path;
+++	int i;
+++	int ret = 0;
+++
+++	cell = devm_nvmem_cell_get(rtwdev->dev, "rtl8197f-calibration");
+++	if (IS_ERR(cell))
+++		return PTR_ERR(cell);
+++
+++	cal = nvmem_cell_read(cell, &len);
+++	if (IS_ERR(cal))
+++		return PTR_ERR(cal);
+++
+++	if (len != RTL8197F_WLAN_CAL_LEN ||
+++	    !is_valid_ether_addr(cal + RTL8197F_WLAN_MAC)) {
+++		ret = -EINVAL;
+++		goto out;
+++	}
+++
+++	for (path = RF_PATH_A; path <= RF_PATH_B; path++) {
+++		struct rtw_5g_txpwr_idx *pwr =
+++			&efuse->txpwr_idx_table[path].pwr_idx_5g;
+++
+++		for (i = 0; i < RTL8197F_WLAN_5G_GROUPS; i++) {
+++			u8 index = cal[base_offset[path] +
+++				       rtl8197f_5g_group_channel[i] - 1];
+++
+++			if (!index || index > rtwdev->chip->max_power_index) {
+++				ret = -EINVAL;
+++				goto out;
+++			}
+++			pwr->bw40_base[i] = index;
+++		}
+++
+++		pwr->ht_1s_diff.ofdm =
+++			rtw8822b_rtl8197f_min_diff(cal, ht1_offset[path], false);
+++		pwr->ht_1s_diff.bw20 =
+++			rtw8822b_rtl8197f_min_diff(cal, ht1_offset[path], true);
+++		pwr->ht_2s_diff.bw20 =
+++			rtw8822b_rtl8197f_min_diff(cal, ht2_offset[path], false);
+++		pwr->ht_2s_diff.bw40 =
+++			rtw8822b_rtl8197f_min_diff(cal, ht2_offset[path], true);
+++		pwr->vht_1s_diff.bw160 =
+++			rtw8822b_rtl8197f_min_diff(cal, vht1_offset[path], false);
+++		pwr->vht_1s_diff.bw80 =
+++			rtw8822b_rtl8197f_min_diff(cal, vht1_offset[path], true);
+++		pwr->vht_2s_diff.bw160 =
+++			rtw8822b_rtl8197f_min_diff(cal, vht2_offset[path], false);
+++		pwr->vht_2s_diff.bw80 =
+++			rtw8822b_rtl8197f_min_diff(cal, vht2_offset[path], true);
+++	}
+++
+++	ether_addr_copy(efuse->addr, cal + RTL8197F_WLAN_MAC);
+++	efuse->rfe_option = 1;
+++	efuse->crystal_cap = cal[RTL8197F_WLAN_XTAL];
+++	efuse->thermal_meter[RF_PATH_A] = cal[RTL8197F_WLAN_THERMAL];
+++	efuse->thermal_meter_k = cal[RTL8197F_WLAN_THERMAL];
+++	efuse->pa_type_2g = BIT(4);
+++	efuse->pa_type_5g = BIT(0);
+++	efuse->lna_type_2g = BIT(3);
+++	efuse->lna_type_5g = BIT(3);
+++	efuse->channel_plan = 0x7f;
+++	efuse->rf_board_option = 0;
+++	efuse->regd = 0;
+++
+++	rtw_info(rtwdev, "loaded RTL8197F RFE1 calibration from nvmem\n");
+++out:
+++	kfree(cal);
+++	return ret;
+++}
+++
++ static int rtw8822b_read_efuse(struct rtw_dev *rtwdev, u8 *log_map)
++ {
++ 	struct rtw_efuse *efuse = &rtwdev->efuse;
++ 	struct rtw8822b_efuse *map;
+++	int ret;
++ 	int i;
++
++ 	map = (struct rtw8822b_efuse *)log_map;
++@@ -83,6 +218,12 @@ static int rtw8822b_read_efuse(struct rt
++ 		return -ENOTSUPP;
++ 	}
++
+++	if (efuse->rfe_option == 0xff) {
+++		ret = rtw8822b_read_rtl8197f_calibration(rtwdev);
+++		if (ret && ret != -ENOENT)
+++			return ret;
+++	}
+++
++ 	return 0;
++ }
++
++@@ -405,5 +546,12 @@ struct rtw8822b_rfe_info {
++	.rtw_set_channel_rfe = &rtw8822b_set_channel_rfe_ ## set_ch,	\
++	}
+++#define EFEM_CCUT(set_ch) {						\
+++	.cca_ccut_2g = &cca_efem_ccut,					\
+++	.cca_ccut_5g = &cca_efem_ccut,					\
+++	.fem = RTW_RFE_EFEM,						\
+++	.rtw_set_channel_rfe = &rtw8822b_set_channel_rfe_ ## set_ch,	\
+++	}
+++
++ #define IFEM_EXT_CCUT(set_ch) {						\
++ 	.cca_ccut_2g = &cca_ifem_ccut_ext,				\
++ 	.cca_ccut_5g = &cca_ifem_ccut_ext,				\
++@@ -413,6 +561,7 @@ struct rtw8822b_rfe_info {
++ 	}
++
++ static const struct rtw8822b_rfe_info rtw8822b_rfe_info[] = {
+++	[1] = EFEM_CCUT(ifem),
++ 	[2] = I2GE5G_CCUT(efem),
++ 	[3] = IFEM_EXT_CCUT(ifem),
++ 	[5] = IFEM_EXT_CCUT(ifem),
++@@ -2475,6 +2624,8 @@ static const struct rtw_pwr_track_tbl rt
++ };
++
++ static const struct rtw_rfe_def rtw8822b_rfe_defs[] = {
+++	/* RFE1 and RFE2 both use an external FEM on this board's 5 GHz band. */
+++	[1] = RTW_DEF_RFE(8822b, 2, 2, 0),
++ 	[2] = RTW_DEF_RFE(8822b, 2, 2, 0),
++ 	[3] = RTW_DEF_RFE(8822b, 3, 0, 0),
++ 	[5] = RTW_DEF_RFE(8822b, 5, 5, 0),
+diff --git a/target/linux/rtl819x/Makefile b/target/linux/rtl819x/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..e48914486930709c9518f560aa1700c62c79e000
+--- /dev/null
++++ b/target/linux/rtl819x/Makefile
+@@ -0,0 +1,18 @@
++# SPDX-License-Identifier: GPL-2.0-only
++
++include $(TOPDIR)/rules.mk
++
++ARCH:=mipsel
++BOARD:=rtl819x
++BOARDNAME:=Realtek RTL819x-class routers
++DEVICE_TYPE:=router
++FEATURES:=ramdisk squashfs pci
++SUBTARGETS:=rtl8197f
++
++KERNEL_PATCHVER:=6.18
++
++include $(INCLUDE_DIR)/target.mk
++
++DEFAULT_PACKAGES += 	dropbear 	mtd 	netifd 	uci 	ubus
++
++$(eval $(call BuildTarget))
+diff --git a/target/linux/rtl819x/base-files/etc/init.d/a2004mu-network-recovery b/target/linux/rtl819x/base-files/etc/init.d/a2004mu-network-recovery
+new file mode 100755
+index 0000000000000000000000000000000000000000..8708b56ec63cbaf6cde2a7ed11bb526cfe5c86a6
+--- /dev/null
++++ b/target/linux/rtl819x/base-files/etc/init.d/a2004mu-network-recovery
+@@ -0,0 +1,14 @@
++#!/bin/sh /etc/rc.common
++
++START=96
++
++boot() {
++	. /lib/functions.sh
++
++	[ "$(board_name)" = "iptime,a2004mu" ] || return 0
++	ubus -t 20 wait_for network.interface.lan >/dev/null 2>&1 && return 0
++
++	logger -t a2004mu-network-recovery \
++		"LAN config unavailable after overlay setup; restarting network"
++	/etc/init.d/network restart
++}
+diff --git a/target/linux/rtl819x/base-files/lib/upgrade/platform.sh b/target/linux/rtl819x/base-files/lib/upgrade/platform.sh
+new file mode 100644
+index 0000000000000000000000000000000000000000..dff1df4d0a677328111a9ca2568d1a1773821ddb
+--- /dev/null
++++ b/target/linux/rtl819x/base-files/lib/upgrade/platform.sh
+@@ -0,0 +1,104 @@
++REQUIRE_IMAGE_METADATA=1
++
++A2004MU_KERNEL_SIZE=2883584
++A2004MU_IMAGE_SIZE=7864320
++A2004MU_ERASE_SIZE=65536
++A2004MU_KERNEL_BLOCKS=44
++
++a2004mu_get_image() {
++	get_image "$1" | fwtool -q -i /dev/null -T -
++}
++
++platform_check_image() {
++	local board kernel_marker product protect_magic rootfs_magic size
++
++	board="$(board_name)"
++	[ "$board" = "iptime,a2004mu" ] || {
++		echo "Sysupgrade is not supported on $board."
++		return 1
++	}
++
++	[ "$SAVE_CONFIG" != 1 ] || {
++		echo "Configuration-preserving sysupgrade is not supported yet; use sysupgrade -n."
++		return 1
++	}
++
++	grep -q 'mtd1: 002c0000 .* "firmware"' /proc/mtd &&
++		grep -q 'mtd2: 00500000 .* "rootfs"' /proc/mtd || {
++			echo "Unexpected A2004MU MTD layout."
++			return 1
++		}
++
++	size="$(a2004mu_get_image "$1" | wc -c)"
++	[ "$size" -eq "$A2004MU_IMAGE_SIZE" ] || {
++		echo "Invalid A2004MU sysupgrade image size: $size."
++		return 1
++	}
++
++	product="$(
++		a2004mu_get_image "$1" |
++			hexdump -v -n 8 -e '1/1 "%02x"'
++	)"
++	[ "$product" = "61323030346d0000" ] || {
++		echo "A2004MU sysupgrade image has no valid product header."
++		return 1
++	}
++
++	protect_magic="$(
++		a2004mu_get_image "$1" |
++			dd bs=1 skip=16 count=4 2>/dev/null |
++			hexdump -v -e '1/1 "%02x"'
++	)"
++	[ "$protect_magic" = "8b998f9a" ] || {
++		echo "A2004MU sysupgrade image has no valid Protect2 header."
++		return 1
++	}
++
++	kernel_marker="$(
++		a2004mu_get_image "$1" |
++			dd bs=1 skip=56 count=8 2>/dev/null
++	)"
++	[ "$kernel_marker" = "kernel" ] || {
++		echo "A2004MU sysupgrade image has no kernel descriptor."
++		return 1
++	}
++
++	# iflag=fullblock is mandatory on every block-sized dd here: the input is a
++	# pipe, a read() from it returns short, and dd counts each short read as a
++	# whole record. Without it skip=/count= are off by however much the pipe
++	# happened to shorten -- the rootfs check reads garbage and, worse, the
++	# kernel write below is silently truncated.
++	rootfs_magic="$(
++		a2004mu_get_image "$1" |
++			dd bs="$A2004MU_ERASE_SIZE" \
++			skip="$A2004MU_KERNEL_BLOCKS" count=1 iflag=fullblock |
++			hexdump -v -n 4 -e '1/1 "%02x"'
++	)"
++	[ "$rootfs_magic" = "68737173" ] || {
++		echo "A2004MU sysupgrade image has no squashfs at 0x2c0000."
++		return 1
++	}
++
++	return 0
++}
++
++platform_do_upgrade() {
++	local board
++
++	board="$(board_name)"
++	[ "$board" = "iptime,a2004mu" ] || exit 1
++
++	mtd erase rootfs_data || exit 1
++
++	# Commit rootfs first so a failed first write leaves the old kernel intact.
++	a2004mu_get_image "$1" |
++		dd bs="$A2004MU_ERASE_SIZE" \
++		skip="$A2004MU_KERNEL_BLOCKS" iflag=fullblock |
++		mtd write - rootfs || exit 1
++
++	# The final kernel write makes the new kernel/rootfs pair bootable.
++	a2004mu_get_image "$1" |
++		dd bs="$A2004MU_ERASE_SIZE" \
++		count="$A2004MU_KERNEL_BLOCKS" iflag=fullblock |
++		mtd write - firmware || exit 1
++}
+diff --git a/target/linux/rtl819x/dts/rtl8197f-a2004mu.dts b/target/linux/rtl819x/dts/rtl8197f-a2004mu.dts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9bd8c08335a36af1a1f01c3d7f005239c95133ea
+--- /dev/null
++++ b/target/linux/rtl819x/dts/rtl8197f-a2004mu.dts
+@@ -0,0 +1,176 @@
++// SPDX-License-Identifier: GPL-2.0-only OR MIT
++
++/dts-v1/;
++
++#include "rtl8197f.dtsi"
++#include <dt-bindings/gpio/gpio.h>
++
++/ {
++	model = "ipTIME A2004MU";
++	compatible = "iptime,a2004mu", "realtek,rtl8197f";
++
++	memory@0 {
++		device_type = "memory";
++		reg = <0x00000000 0x04000000>;
++	};
++
++	/*
++	 * SoC GPIO, ports A-D bank (PABCD) of the RTL8197F GPIO block at
++	 * 0x18003500: data reg +0x0c, direction reg +0x08 (1 = output).
++	 * Generic memory-mapped GPIO (bcm6345 flavour) suffices because the
++	 * bootloader already muxes the two SMI pins to GPIO function (pin 18 =
++	 * portC.2 = SMI clock, pin 19 = portC.3 = SMI data; confirmed by the
++	 * empirical SMI sweep that read RTL8367 chip id 0x6367 on these pins).
++	 * gpio N == bit N: gpio 18/19 = the SMI clock/data lines.
++	 */
++	gpio: gpio@1800350c {
++		compatible = "brcm,bcm6345-gpio";
++		reg = <0x1800350c 0x4>, <0x18003508 0x4>;
++		reg-names = "dat", "dirout";
++		gpio-controller;
++		#gpio-cells = <2>;
++		ngpios = <32>;
++	};
++
++	/*
++	 * External Realtek RTL8367RB-VB (chip id 0x6367, ver 0x0020) that
++	 * carries all physical LAN/WAN ports.  Managed over the bit-banged SMI
++	 * (mdc = gpio 18, mdio = gpio 19); the mainline rtl8365mb DSA driver
++	 * recognises this exact chip and does the full init (jam table, extint
++	 * RGMII with delay, CPU port, VLAN).  Extension interface 1 is switch
++	 * port 6 (RGMII) = the CPU port wired to eth0.  Port map from the stock
++	 * hwparam: LAN1-4 = ports 0-3, WAN = port 4.
++	 */
++	switch {
++		compatible = "realtek,rtl8365mb";
++		mdc-gpios = <&gpio 18 GPIO_ACTIVE_HIGH>;
++		mdio-gpios = <&gpio 19 GPIO_ACTIVE_HIGH>;
++
++		ethernet-ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			ethernet-port@0 {
++				reg = <0>;
++				label = "lan1";
++				phy-handle = <&ethphy0>;
++			};
++			ethernet-port@1 {
++				reg = <1>;
++				label = "lan2";
++				phy-handle = <&ethphy1>;
++			};
++			ethernet-port@2 {
++				reg = <2>;
++				label = "lan3";
++				phy-handle = <&ethphy2>;
++			};
++			ethernet-port@3 {
++				reg = <3>;
++				label = "lan4";
++				phy-handle = <&ethphy3>;
++			};
++			ethernet-port@4 {
++				reg = <4>;
++				label = "wan";
++				phy-handle = <&ethphy4>;
++			};
++			ethernet-port@6 {
++				reg = <6>;
++				ethernet = <&eth0>;
++				phy-mode = "rgmii";
++				rx-internal-delay-ps = <1500>;
++				fixed-link {
++					speed = <1000>;
++					full-duplex;
++				};
++			};
++		};
++
++		mdio {
++			compatible = "realtek,smi-mdio";
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			ethphy0: ethernet-phy@0 {
++				reg = <0>;
++			};
++			ethphy1: ethernet-phy@1 {
++				reg = <1>;
++			};
++			ethphy2: ethernet-phy@2 {
++				reg = <2>;
++			};
++			ethphy3: ethernet-phy@3 {
++				reg = <3>;
++			};
++			ethphy4: ethernet-phy@4 {
++				reg = <4>;
++			};
++		};
++	};
++};
++
++&spi0 {
++	status = "okay";
++
++	flash@0 {
++		partitions {
++			compatible = "fixed-partitions";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			bootloader: partition@0 {
++				label = "bootloader";
++				reg = <0x00000000 0x00040000>;
++				read-only;
++
++				nvmem-layout {
++					compatible = "fixed-layout";
++					#address-cells = <1>;
++					#size-cells = <1>;
++
++					macaddr_hwsetting: mac-address@20007 {
++						reg = <0x00020007 0x6>;
++					};
++
++					rtl8822b_calibration: calibration@20013 {
++						reg = <0x00020013 0x640>;
++					};
++				};
++			};
++
++			partition@40000 {
++				label = "firmware";
++				reg = <0x00040000 0x002c0000>;
++			};
++
++			partition@300000 {
++				label = "rootfs";
++				reg = <0x00300000 0x00500000>;
++			};
++		};
++	};
++};
++
++&eth0 {
++	nvmem-cells = <&macaddr_hwsetting>;
++	nvmem-cell-names = "mac-address";
++};
++
++&pcie {
++	pcie@0,0 {
++		reg = <0x0000 0 0 0 0>;
++		#address-cells = <3>;
++		#size-cells = <2>;
++		ranges;
++
++		wifi@0,0 {
++			compatible = "pci10ec,b822";
++			reg = <0x0000 0 0 0 0>;
++			ieee80211-freq-limit = <5000000 6000000>;
++			nvmem-cells = <&rtl8822b_calibration>;
++			nvmem-cell-names = "rtl8197f-calibration";
++		};
++	};
++};
+diff --git a/target/linux/rtl819x/dts/rtl8197f.dtsi b/target/linux/rtl819x/dts/rtl8197f.dtsi
+new file mode 100644
+index 0000000000000000000000000000000000000000..75b50cb319520618dc229b4903d856ce1051c8ae
+--- /dev/null
++++ b/target/linux/rtl819x/dts/rtl8197f.dtsi
+@@ -0,0 +1,183 @@
++// SPDX-License-Identifier: GPL-2.0-only OR MIT
++
++#include <dt-bindings/interrupt-controller/irq.h>
++
++/ {
++	#address-cells = <1>;
++	#size-cells = <1>;
++	compatible = "realtek,rtl8197f";
++	/*
++	 * No global interrupt-parent: cpuintc is the root MIPS CPU controller
++	 * and must have no parent, otherwise it inherits ictl and of_irq_init
++	 * mis-orders (or cycles) the controllers, leaving the CP0 timer IRQ
++	 * unmapped. Peripherals name &ictl explicitly.
++	 */
++
++	aliases {
++		serial0 = &serial0;
++		spi0 = &spi0;
++	};
++
++	chosen {
++		/*
++		 * CONFIG_MIPS_CMDLINE_FROM_DTB uses this bootargs verbatim. Bare
++		 * "earlycon" activates the stdout-path node's earlycon (the
++		 * RTL8197F quirked one), giving clean output from the very first
++		 * kernel message; console=ttyS0,38400 hands over to the full
++		 * 8250_of port once it registers.
++		 */
++		bootargs = "earlycon console=ttyS0,38400";
++		stdout-path = "serial0:38400n8";
++	};
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		cpu@0 {
++			device_type = "cpu";
++			compatible = "mips,mips24Kc";
++			reg = <0>;
++		};
++	};
++
++	clocks {
++		uart_clk: uart-clock {
++			compatible = "fixed-clock";
++			#clock-cells = <0>;
++			/*
++			 * Measured, not guessed: the loader read the divisor the
++			 * bootloader programmed for its clean 38400 console and it
++			 * is 162 (0xa2). 162 * 16 * 38400 = 99532800, so the UART
++			 * reference is ~99.53 MHz. Using this exact value makes the
++			 * kernel's 8250 compute divisor 162 -- identical to the
++			 * bootloader -- instead of 163 (from the scaffold's 100 MHz),
++			 * which garbled the console.
++			 */
++			clock-frequency = <99532800>;
++		};
++
++		spic_clk: spic-clock {
++			compatible = "fixed-clock";
++			#clock-cells = <0>;
++			clock-frequency = <200000000>;
++		};
++	};
++
++	cpuintc: interrupt-controller {
++		compatible = "mti,cpu-interrupt-controller";
++		interrupt-controller;
++		#address-cells = <0>;
++		#interrupt-cells = <1>;
++	};
++
++	ictl: interrupt-controller@18003000 {
++		compatible = "realtek,rtl8197f-ictl";
++		reg = <0x18003000 0x38>;
++		interrupt-controller;
++		#interrupt-cells = <1>;
++		/*
++		 * No cascade parent yet: the CP0 timer is routed to MIPS CPU IP2
++		 * (IntCtl IPTI reads 2), so the peripheral controller cannot also
++		 * cascade on IP2. Its real CPU IP is still unconfirmed; until then
++		 * the ictl registers standalone (peripheral IRQs inactive) so the
++		 * timer can claim IP2 and the kernel boots. Console output is via
++		 * polled early_printk / 8250 TX and does not need the ictl IRQ.
++		 */
++	};
++
++	serial0: serial@18147000 {
++		/*
++		 * 16550A whose RX/TX data register is at 0x24, not 0x00 (the
++		 * divisor latch keeps 0x00). Needs the 8250_of quirk; plain
++		 * ns16550a writes characters into the divisor latch.
++		 */
++		compatible = "realtek,rtl8197f-uart";
++		reg = <0x18147000 0x100>;
++		reg-shift = <2>;
++		reg-io-width = <4>;
++		clock-frequency = <99532800>;
++		/*
++		 * No interrupt on purpose: the ictl cascade is not wired up yet
++		 * (only the CP0 timer on IP7 works), so the UART IRQ never fires
++		 * and the interrupt-driven TTY TX/RX path stalls -- writes to
++		 * /dev/ttyS0 are queued but never transmitted (the polled printk
++		 * console still works, which masked this). With no "interrupts"
++		 * property the 8250 core falls back to timer polling, so the
++		 * interactive login console on ttyS0 works. Restore the IRQ once
++		 * the ictl peripheral cascade is enabled (also needed for eth).
++		 */
++		status = "okay";
++	};
++
++	spi0: spi@18143000 {
++		/*
++		 * RTL8197F flash controller: a Synopsys DesignWare SSI
++		 * (BSP_SPIC_BASE = 0x18143000). The boot SPI-NOR hangs off this.
++		 */
++		compatible = "realtek,rtl8197f-sheipa-spi";
++		reg = <0x18143000 0x1000>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++		status = "okay";
++
++		flash@0 {
++			compatible = "jedec,spi-nor";
++			reg = <0>;
++			spi-max-frequency = <18000000>;
++			/* Board DTS must provide fixed partitions. */
++		};
++	};
++
++	pcie: pcie@18b00000 {
++		/*
++		 * Single-lane root port. reg order is what the driver expects:
++		 * root-port config, root-port extended block (MDIO/PHY power),
++		 * downstream device config, and the system register window it
++		 * shares with the ethernet for clocks, PERST# and the ictl.
++		 *
++		 * All four INTx lines collapse onto one SoC interrupt, which the
++		 * BSP routes to CPU IP5 -- like the switch core on IP4, it does
++		 * not go through the ictl cascade.
++		 */
++		compatible = "realtek,rtl8197f-pcie";
++		reg = <0x18b00000 0x1000>,
++		      <0x18b01000 0x1000>,
++		      <0x18b10000 0x1000>,
++		      <0x18000000 0x4000>;
++		device_type = "pci";
++		bus-range = <0x00 0x01>;
++		#address-cells = <3>;
++		#size-cells = <2>;
++		/*
++		 * MEM only. The SoC also decodes a 2 MB PCIe IO window at
++		 * 0x18c00000, but the PCI core caps IO space at 64 KB, so
++		 * advertising it just collides with ioport_resource and fails
++		 * the probe. The Wi-Fi endpoint uses MMIO BARs anyway.
++		 */
++		ranges = <0x02000000 0 0x19000000 0x19000000 0 0x00c00000>;
++		#interrupt-cells = <1>;
++		interrupt-map-mask = <0 0 0 0>;
++		interrupt-map = <0 0 0 0 &cpuintc 5>;
++		status = "okay";
++	};
++
++	eth0: ethernet@18010000 {
++		/*
++		 * RTL8197F on-SoC CPU network engine (swNic): a descriptor-ring
++		 * DMA engine at CPU_IFACE_BASE 0x18010000 bound to the internal
++		 * 5-port switch CPU port.
++		 *
++		 * The switch core does not need the ictl cascade: the Realtek
++		 * BSP routes it (GISR source 15, SW_IP) straight to a CPU IP via
++		 * the ictl routing register IRR1 and treats it as a plain CPU
++		 * interrupt (BSP_SWCORE_IRQ = BSP_IRQ_CPU_BASE + 4). The driver
++		 * programs that routing; this only names the resulting CPU IP.
++		 */
++		compatible = "realtek,rtl8197f-eth";
++		reg = <0x18010000 0x200>;
++		interrupt-parent = <&cpuintc>;
++		interrupts = <4>;
++		status = "okay";
++	};
++};
+diff --git a/target/linux/rtl819x/files/arch/mips/rtl819x/Makefile b/target/linux/rtl819x/files/arch/mips/rtl819x/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..e14ee483cb27143afe86140d939540d26a63e9b0
+--- /dev/null
++++ b/target/linux/rtl819x/files/arch/mips/rtl819x/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0
++#
++# Provisional RTL819x-class platform directory for Stage 0 bring-up.
++# Hardware initialization is intentionally not implemented here yet.
++
++obj-y += setup.o
+diff --git a/target/linux/rtl819x/files/arch/mips/rtl819x/setup.c b/target/linux/rtl819x/files/arch/mips/rtl819x/setup.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..92a8f8d145bee15a27a1e3aba7c8dfe535407b71
+--- /dev/null
++++ b/target/linux/rtl819x/files/arch/mips/rtl819x/setup.c
+@@ -0,0 +1,159 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Realtek RTL819x-class platform hook scaffold.
++ *
++ * These stubs only satisfy mandatory MIPS platform link hooks while the
++ * RTL8197F Stage 0A/0B boot path is being forward-ported.
++ */
++
++#include <linux/init.h>
++#include <linux/irqchip.h>
++#include <linux/irqdomain.h>
++#include <linux/memblock.h>
++#include <linux/of.h>
++#include <linux/of_clk.h>
++#include <linux/sizes.h>
++#include <linux/string.h>
++#include <linux/types.h>
++
++#include <asm/bootinfo.h>
++#include <asm/mipsregs.h>
++#include <asm/page.h>
++#include <asm/prom.h>
++#include <asm/reboot.h>
++#include <asm/thread_info.h>
++#include <asm/irq.h>
++#include <asm/time.h>
++
++#define RTL8197F_STAGE0_CMDLINE	"console=ttyS0,38400"
++#define RTL8197F_GIMR		0xb8003000
++#define RTL8197F_GIMR2		0xb8003020
++#define RTL8197F_WDTCNR		0xb800311c
++
++/*
++ * RTL8197F UART (KSEG1 0xb8147000): LSR at +0x14 (THRE = 0x20), and the RX/TX
++ * data register at +0x24 -- not the standard 16550 +0x00. This provides
++ * CONFIG_EARLY_PRINTK output from setup_early_printk() onward, independent of
++ * the DT-matched earlycon, so an early boot hang is visible on UART.
++ */
++void prom_putchar(char c)
++{
++	volatile u32 *lsr = (volatile u32 *)0xb8147014;
++	volatile u32 *thr = (volatile u32 *)0xb8147024;
++
++	while (!(*lsr & 0x20))
++		;
++	*thr = (u8)c;
++}
++
++const char *get_system_type(void)
++{
++	return "Realtek RTL8197F";
++}
++
++static void rtl8197f_restart(char *command)
++{
++	*(volatile u32 *)RTL8197F_GIMR = 0;
++	*(volatile u32 *)RTL8197F_GIMR2 = 0;
++	local_irq_disable();
++	*(volatile u32 *)RTL8197F_WDTCNR = 0;
++
++	for (;;)
++		;
++}
++
++void __init prom_init(void)
++{
++	/* TODO: parse bootloader arguments once the firmware ABI is defined. */
++	strscpy(arcs_cmdline, RTL8197F_STAGE0_CMDLINE, COMMAND_LINE_SIZE);
++}
++
++void __init plat_mem_setup(void)
++{
++	void *dtb;
++
++	_machine_restart = rtl8197f_restart;
++
++	/*
++	 * Load the appended device tree. Without this the kernel runs with NO
++	 * live DT: of_find_compatible_node()/of_irq_init() find nothing, so the
++	 * cpuintc (mti,cpu-interrupt-controller) domain is never created and the
++	 * timer IRQ has no chip. get_fdt() returns &__appended_dtb for
++	 * CONFIG_MIPS_RAW_APPENDED_DTB; __dt_setup_arch() sets initial_boot_params
++	 * (and, with CMDLINE_FROM_DTB, the kernel cmdline), and the MIPS core
++	 * arch_mem_init()->device_tree_init() then unflattens it.
++	 */
++	dtb = get_fdt();
++	if (dtb)
++		__dt_setup_arch(dtb);
++
++	/* DT has no memory node yet; keep the fixed 64 MB until RAM is modelled. */
++	memblock_add(0, SZ_64M);
++}
++
++void __init plat_time_init(void)
++{
++	/*
++	 * Register the device-tree fixed-clocks (spic_clk, uart_clk, ...). The
++	 * generic of_platform populate does not turn the /clocks child nodes into
++	 * platform devices, and nothing else calls of_clk_init here, so without
++	 * this the SPI controller (clocks = <&spic_clk>) probe-defers forever and
++	 * the boot flash / rootfs never appear.
++	 */
++	of_clk_init(NULL);
++
++	/*
++	 * CP0 Count/Compare timer frequency. On MIPS 24Kc the Count register runs
++	 * at half the CPU clock (bootloader reports 999 MHz). TODO: derive from a
++	 * DT CPU clock once modelled.
++	 */
++	mips_hpt_frequency = 999000000 / 2;
++
++	/*
++	 * On the RTL8197F the CP0 compare timer's SI_TimerInt is NOT delivered on a
++	 * CP0 IP directly; it is fed into the SoC interrupt controller (ictl at
++	 * 0x18003000) as GISR2 bit 15 (CPU_SI_TIMER). The Realtek BSP routes that
++	 * source to CPU IP7 via the ictl routing register IRR5 and enables it in
++	 * GIMR2, then handles it as the r4k compare IRQ on IP7 (BSP_COMPARE_IRQ =
++	 * CPU_BASE+7). Without this the compare interrupt never reaches the CPU and
++	 * the boot hangs in calibrate_delay(). Program the ictl the same way (KSEG1
++	 * regs), then point the r4k clockevent at IP7. (IntCtl.IPTI reads 2 here and
++	 * is read-only / irrelevant to this routing.)
++	 */
++	{
++		volatile u32 *gimr2 = (volatile u32 *)0xb8003020;
++		volatile u32 *irr5  = (volatile u32 *)0xb800302c;
++
++		*irr5 = 0x70000000;		/* CPU_SI_TIMER (src47) -> CPU IP7 */
++		*gimr2 |= (1u << 15);		/* enable CPU_SI_TIMER */
++	}
++	cp0_compare_irq = 7;
++	cp0_perfcount_irq = -1;
++}
++
++void __init arch_init_irq(void)
++{
++	/* TODO: confirm RTL8197F ICTL IRR0..7 routing before boot use. */
++	irqchip_init();
++}
++
++/*
++ * The MIPS CPU interrupt controller (mti,cpu-interrupt-controller) domain maps
++ * hwirq N -> virq N (legacy, base 0). Hand the r4k clockevent the virq for the
++ * CP0 compare hwirq (cp0_compare_irq, forced to IP7 above) via that domain so it
++ * carries the mips_cpu_irq_controller chip.
++ */
++unsigned int get_c0_compare_int(void)
++{
++	struct device_node *np;
++	struct irq_domain *d;
++
++	np = of_find_compatible_node(NULL, NULL, "mti,cpu-interrupt-controller");
++	d = np ? irq_find_host(np) : NULL;
++	of_node_put(np);
++
++	if (d)
++		return irq_create_mapping(d, cp0_compare_irq);
++
++	return MIPS_CPU_IRQ_BASE + cp0_compare_irq;
++}
+diff --git a/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c b/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..e06c35ae5dacadfe58ec66b53ba46621ad34afe1
+--- /dev/null
++++ b/target/linux/rtl819x/files/drivers/net/ethernet/realtek/rtl8197f_eth.c
+@@ -0,0 +1,2017 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Realtek RTL8197F on-SoC CPU network engine ("swNic") driver.
++ *
++ * Reimplemented from the RTL8197F SDK register-level facts (drivers/net/rtl819x):
++ * a descriptor-ring DMA engine at CPU_IFACE_BASE 0x18010000 that hangs off the
++ * on-chip 5-port switch. RX/TX run under NAPI driven by the switch-core
++ * interrupt (a plain CPU IP -- see the ictl comment below), with a slow timer
++ * as a safety net and a full polled fallback when the DT carries no interrupt.
++ * It registers a single eth0 bound to the CPU port; the switch does the egress
++ * lookup (hwlkup+bridge) so frames flood to the LAN ports.
++ */
++
++#include <linux/delay.h>
++#include <linux/etherdevice.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_net.h>
++#include <linux/platform_device.h>
++#include <linux/dma-mapping.h>
++#include <linux/timer.h>
++
++/* CPU interface registers (offsets from the mapped base = phys 0x18010000). */
++/* The swNic DMA engine wants descriptor-ring addresses in the uncached
++ * window: SDK writes (ring | UNCACHE_MASK) to CPURPDCR/CPUTPDCR. */
++#define UNCACHE_MASK	0x20000000
++#define CPUICR		0x000	/* interface control */
++#define CPURPDCR(i)	(0x004 + ((i) << 2))	/* Rx ring i base / cdp */
++#define CPUTPDCR(i)	(0x020 + ((i) << 2))	/* Tx ring i base / cdp */
++#define CPUIIMR		0x028	/* interrupt mask (SDK asicregs.h CPUIIMR) */
++#define CPUIISR		0x02c	/* interrupt status (SDK asicregs.h CPUIISR) */
++
++/*
++ * CPUIIMR/CPUIISR share a bit layout. CPUIISR is write-1-to-clear, so an
++ * interrupt is acked by writing the value just read back.
++ */
++#define II_RX_DONE_ALL		(0x3fu << 3)	/* Rx ring 0..5 packet done */
++#define II_TX_DONE_ALL		(0x3u << 9)	/* Tx ring 0..1 packet done */
++#define II_PKTHDR_RUNOUT_ALL	(0x3fu << 17)	/* Rx ring 0..5 descriptor runout */
++#define II_NAPI_SOURCES		(II_RX_DONE_ALL | II_TX_DONE_ALL | \
++				 II_PKTHDR_RUNOUT_ALL)
++#define DMA_CR0		0x03c
++#define DMA_CR1		0x040
++#define TXRINGCR	0x078
++#define DMA_CR4		0x0a0
++#define CPUICR1		0x0a4
++
++/* System register block @ phys 0x18000000 (KSEG1 0xb8000000). */
++#define SYSREG_BASE_PHYS	0x18000000
++#define SYSREG_SIZE		0x4000	/* covers SYS 0x800/0x850 + GPIO block @0x3500 */
++#define CLK_MANAGE		0x010		/* 0xb8000010 */
++#define CLK_MANAGE_SWITCH	(1u << 11)	/* switch/NIC core clock */
++#define CLK_MANAGE_LX2_CLK	(1u << 19)
++#define CLK_MANAGE_LX2_ARB	(1u << 20)
++
++/*
++ * SoC interrupt controller (ictl), phys 0x18003000 -- inside the sysreg
++ * mapping above, at +0x3000. The Realtek BSP header (mach-rtl8197f/bspchip.h)
++ * documents it as a router: GISR/GIMR hold one bit per source, and the IRRn
++ * registers assign each source a CPU IP number in a 4-bit field. GISR bit 15
++ * is SW_IP, the switch core (our NIC), and IRR1 covers sources [15:8] with
++ * source 15 in the top nibble. The BSP routes the switch core to CPU IP4
++ * (BSP_SWCORE_IRQ = BSP_IRQ_CPU_BASE + 4), so it never uses the ictl's own
++ * cascade -- which is why this works while the cascade is still unwired. The
++ * CP0 timer is set up the same way in arch/mips/rtl819x/setup.c (IRR5 -> IP7).
++ */
++#define ICTL_GIMR		0x3000
++#define ICTL_IRR1		0x300c
++#define ICTL_GIMR_SW_IE		(1u << 15)
++#define SWCORE_CPU_IP		4		/* must match the DT interrupts = <4> */
++#define ICTL_IRR1_SRC15_MASK	0xf0000000u
++#define ICTL_IRR1_SRC15_IP	(SWCORE_CPU_IP << 28)
++
++/* Switch core block @ phys 0x1b800000 (KSEG1 0xbb800000). */
++#define SWCORE_BASE_PHYS	0x1b800000
++#define SWCORE_SIZE		0x8000
++#define SW_CVIDR		0x4200		/* SWMISC + 0x00: chip version id */
++#define SW_SIRR			0x4204		/* SWMISC + 0x04: system init/reset */
++#define SIRR_TRXRDY		(1u << 0)	/* start normal TX and RX */
++
++/* Per-port config (within the swcore mapping). */
++#define SW_PCRP(n)		(0x4104 + ((n) * 4))	/* PCRAM+0x4+n*4: port cfg */
++#define PCR_ENABLE_PHYIF	(1u << 0)		/* enable PHY interface */
++#define PCR_FORCE_DUPLEX	(1u << 18)
++#define PCR_FORCE_SPEED_100	(1u << 19)
++#define PCR_FORCE_LINK		(1u << 23)
++#define PCR_EN_FORCE_MODE	(1u << 25)
++#define PCR_FORCE_UP	(PCR_EN_FORCE_MODE | PCR_FORCE_LINK | \
++			 PCR_FORCE_SPEED_100 | PCR_FORCE_DUPLEX)
++#define BMCR_FORCE_100_FD	0x2100	/* 100M(13) full(8), autoneg off */
++
++#define SW_PSRP(n)		(0x4128 + ((n) * 4))	/* PCRAM+0x28+n*4: port status */
++#define SW_MIB_RXPKT(n)		(0x1000 + 0x84 + ((n) * 0x80))	/* per-port rx pkts */
++#define SW_P0GMIICR		0x414c
++#define P0GMIICR_CPU_TAG	(1u << 25)
++#define P0GMIICR_TX_CPU_TAG	(1u << 26)
++
++/* MDC/MDIO controller for the internal PHYs (SWMACCR @ swcore+0x4000). */
++#define SW_MDCIOCR		0x4004		/* command */
++#define SW_MDCIOSR		0x4008		/* status/result */
++#define MDC_CMD_WRITE		(1u << 31)	/* 1=write, 0=read */
++#define MDC_PHYADD_SH		24		/* PHY address [28:24] */
++#define MDC_REGADD_SH		16		/* PHY register [20:16] */
++#define MDC_STATUS_BUSY		(1u << 31)	/* MDCIOSR: 1=in progress */
++
++#define MII_BMCR		0x00
++#define MII_BMSR		0x01
++#define MII_ADVERTISE		0x04
++#define BMCR_RESET_ANEG		0x9000		/* BMCR reset(15) + aneg enable(12) */
++#define BMCR_ANEG_RESTART	0x1200		/* aneg enable(12) + restart(9) */
++#define ADVERTISE_10_100_PAUSE	0x0de1		/* 10/100 h/f + pause + CSMA */
++#define BMSR_LINK		(1u << 2)
++#define RTL_NPORTS		5
++
++/*
++ * Switch-core init registers (offsets from the swcore base 0x1b800000), matching
++ * the clean-room hackpascal RE865X driver (lede-rtl8196c, branch realtek). The
++ * rtl865x switch core is shared with the 8197F; register bases verified equal.
++ */
++#define SW_RESET		0x4204	/* MISC+0x04 (also SIRR): reset/trx-ready */
++#define SW_RESET_FULL		(1u << 2)
++#define SW_TRX_READY		(1u << 0)
++#define SW_MIB_CONTROL		0x1000
++#define SW_MIB_ALL_RESTART	0x0000ffff	/* restart all per-port counters */
++#define SW_PORTCFG(p)		(0x4104 + ((p) * 4))	/* == SW_PCRP(p) */
++#define SW_PORTCFG_PHYIF	(1u << 0)
++#define SW_PORTCFG_MAC_RESET_L	(1u << 3)
++#define SW_PORTCFG_EXTPHY_SH	26
++#define SW_FRAME_FWD_CFG	0x4428	/* ALE+0x28 */
++#define SW_UNICAST_TO_CPU	(1u << 1)
++#define SW_MULTICAST_TO_CPU	(1u << 0)
++#define SW_VLAN_CONTROL_0	0x4a00
++#define SW_VLAN_INGRESS_ALL	0x1ff
++#define SW_TABLE_CONTROL_0	0x4418	/* ALE+0x18 */
++#define SW_LAN_DECISION_SH	16	/* [17:16], 0=by-vlan */
++#define SW_LAN_DECISION_MASK	0x3
++#define SW_UNKNOWN_VLAN_TO_CPU	(1u << 15)
++#define SW_UNKNOWN_NAPT_TO_CPU	(1u << 14)
++#define SW_TLU_STOP		(1u << 18)
++#define SW_TLU_STOPPED		(1u << 19)
++#define SW_MODULE_SW_CONTROL	0x4410	/* ALE+0x10 */
++#define SW_L2_ENGINE_ENABLE	(1u << 0)
++#define SW_MAC_CONFIG		0x4000	/* GLOBAL_PORT_CTRL+0x00 */
++#define SW_MAC_CTRL1		0x5100	/* EXT_MAC: CPU-port MAC control */
++#define SW_CMAC_CLK_SEL		(1u << 0)
++#define SW_CMAC_LATPKT_EN	(1u << 5)
++#define SW_CF_RXIPG_MASK	0xf	/* [3:0] */
++#define SW_SELIPG_SH		18	/* [19:18] */
++#define SW_SELIPG_MASK		0x3
++#define SW_SELIPG_11		2
++#define SW_PORTCFG_FORCED_MODE	(1u << 25)
++/* Table access (VLAN LUT) */
++#define SW_TBL_ACC_CONTROL	0x4d00
++#define SW_TBL_ACC_ADDRESS	0x4d08
++#define SW_TBL_ACC_DATA(i)	(0x4d20 + ((i) * 4))
++#define SW_TBL_CMD_FORCE	(1u << 1)	/* cmd = force write */
++#define SW_TBL_ACTION		(1u << 0)
++
++/* CPUICR bits */
++#define TXCMD		(1u << 31)
++#define RXCMD		(1u << 30)
++#define BUSBURST_128W	(2u << 28)
++#define MBUF_2048B	(4u << 24)
++#define TXFD		(1u << 23)
++#define CPUICR_ENABLE	(TXCMD | RXCMD | BUSBURST_128W | MBUF_2048B)
++
++#define DMA_CR4_TX0_TAIL_AWARE	(1u << 0)
++#define TX_RING0_EN		(1u << 0)
++#define TX_RING1_EN		(1u << 1)
++#define CPUICR1_TXRX_DIV_LX	(1u << 0)
++#define CPUICR1_LITTLE_ENDIAN	(1u << 1)
++#define CPUICR1_TSO_ID		(1u << 4)
++#define CPUICR1_NEW_DESC	(1u << 8)
++
++/* Descriptor opts1 bits */
++#define D_OWN		(1u << 0)	/* owned by SWCORE (hw) */
++#define D_WRAP		(1u << 1)	/* end of ring */
++#define D_LS		(1u << 2)	/* last segment */
++#define D_FS		(1u << 3)	/* first segment */
++#define D_HWLKUP	(1u << 4)
++#define D_BRIDGE	(1u << 5)
++#define TD_PHLEN_SH	6		/* tx: packet length, [22:6] */
++#define TD_PHLEN_MASK	0x1ffff
++#define TD_MLEN_SH	15		/* tx opts2: mbuf length */
++#define RD_LEN_MASK	0x3fff		/* rx opts2: received length (incl CRC) */
++#define RD_EXTSIZE_SH	16		/* rx opts1: buffer size, [31:16] */
++#define RD_SPA_SH	13		/* rx opts4: source port [15:13] */
++#define RD_SPA_MASK	0x7
++
++#define RTL8_4_TAG_LEN	8
++#define RTL8_4_ETHERTYPE	0x8899
++#define RTL8_4_PROTOCOL		0x04
++#define RTL8_4_RX_MASK		0x07ff
++
++#define RTL_RING_SIZE	128
++#define RTL_TX_RING1_SIZE	2
++#define RTL_BUF_SIZE	2048
++#define RTL_TXCAP_SIZE	96
++/*
++ * The RTL8197F swNic has 6 hardware RX pkthdr rings (CPURPDCR0..5). The switch
++ * delivers CPU-bound frames to whichever ring its priority/queue map selects,
++ * so ALL six must point at valid buffers -- an unconfigured ring keeps the
++ * bootloader's garbage base and the DMA engine then corrupts kernel memory when
++ * a frame lands on it (observed as an unrelated-process maple-tree Oops).
++ * Matches the SDK New_swNic_init loop over NEW_NIC_MAX_RX_DESC_RING.
++ */
++#define NUM_RX_RING	6
++#define RTL_POLL_MS	1
++/*
++ * Safety-net poll used in interrupt mode. It only has to catch a lost
++ * interrupt, so it is slow enough to cost nothing when the IRQ works.
++ */
++#define RTL_SAFETY_MS	1000
++
++/* 6 x u32 = 24-byte hardware descriptor (opts1, addr, opts2..opts5). */
++struct rtl_desc {
++	u32 opts1;
++	u32 addr;
++	u32 opts2;
++	u32 opts3;
++	u32 opts4;
++	u32 opts5;
++};
++
++struct rtl_eth {
++	void __iomem *base;
++	void __iomem *sysreg;	/* 0x18000000: CLK_MANAGE */
++	void __iomem *swcore;	/* 0x1b800000: SIRR/CVIDR */
++	struct net_device *ndev;
++	struct device *dev;
++	struct napi_struct napi;
++	struct timer_list poll_timer;
++	int irq;		/* swcore IRQ, or <0 when running polled */
++	bool irq_mode;		/* true once the IRQ is claimed and unmasked */
++
++	struct rtl_desc *rx_ring[NUM_RX_RING];
++	dma_addr_t rx_ring_dma[NUM_RX_RING];
++	struct sk_buff *rx_skb[NUM_RX_RING][RTL_RING_SIZE];
++	dma_addr_t rx_buf_dma[NUM_RX_RING][RTL_RING_SIZE];
++	unsigned int rx_head[NUM_RX_RING];
++
++	struct rtl_desc *tx_ring;
++	dma_addr_t tx_ring_dma;
++	struct rtl_desc *tx_ring1;
++	dma_addr_t tx_ring1_dma;
++	struct sk_buff *tx_skb[RTL_RING_SIZE];
++	dma_addr_t tx_buf_dma[RTL_RING_SIZE];
++	unsigned int tx_head;	/* next to fill */
++	unsigned int tx_tail;	/* next to reap */
++	spinlock_t tx_lock;
++	u8 txcap[RTL_TXCAP_SIZE];
++	unsigned int txcap_len;
++	unsigned int txcap_seq;
++	u32 rx_last_opts4;
++	u8 rx_last_spa;
++
++	unsigned long next_link_log;	/* jiffies: throttle link diag */
++	u16 link_seen;			/* bitmask of phyaddrs last seen linked */
++	u16 mdio_last;			/* last value read via the mdio sysfs poke */
++	u32 reg_last;			/* last value read via the reg sysfs poke */
++	u16 smi_sck;			/* GPIO id (port<<8|pin) for ext-switch SMI clock */
++	u16 smi_sda;			/* GPIO id for ext-switch SMI data */
++	bool dma_on;			/* CPU-NIC DMA engine enabled (runtime-gated) */
++};
++
++static inline u32 rtl_rd(struct rtl_eth *p, u32 reg)
++{
++	return readl(p->base + reg);
++}
++
++static inline void rtl_wr(struct rtl_eth *p, u32 reg, u32 val)
++{
++	writel(val, p->base + reg);
++}
++
++static int rtl_alloc_rx_buf(struct rtl_eth *p, unsigned int ring, unsigned int i)
++{
++	struct sk_buff *skb;
++	dma_addr_t dma;
++
++	skb = netdev_alloc_skb(p->ndev, RTL_BUF_SIZE);
++	if (!skb)
++		return -ENOMEM;
++
++	dma = dma_map_single(p->dev, skb->data, RTL_BUF_SIZE, DMA_FROM_DEVICE);
++	if (dma_mapping_error(p->dev, dma)) {
++		dev_kfree_skb_any(skb);
++		return -ENOMEM;
++	}
++
++	p->rx_skb[ring][i] = skb;
++	p->rx_buf_dma[ring][i] = dma;
++	p->rx_ring[ring][i].addr = (u32)dma;
++	p->rx_ring[ring][i].opts1 = D_OWN | (RTL_BUF_SIZE << RD_EXTSIZE_SH) |
++			      (i == RTL_RING_SIZE - 1 ? D_WRAP : 0);
++	return 0;
++}
++
++static void rtl_free_rings(struct rtl_eth *p)
++{
++	unsigned int r, i;
++
++	for (r = 0; r < NUM_RX_RING; r++) {
++		for (i = 0; i < RTL_RING_SIZE; i++) {
++			if (p->rx_skb[r][i]) {
++				dma_unmap_single(p->dev, p->rx_buf_dma[r][i],
++						 RTL_BUF_SIZE, DMA_FROM_DEVICE);
++				dev_kfree_skb_any(p->rx_skb[r][i]);
++				p->rx_skb[r][i] = NULL;
++			}
++		}
++	}
++	for (i = 0; i < RTL_RING_SIZE; i++) {
++		if (p->tx_skb[i]) {
++			dma_unmap_single(p->dev, p->tx_buf_dma[i],
++					 p->tx_skb[i]->len, DMA_TO_DEVICE);
++			dev_kfree_skb_any(p->tx_skb[i]);
++			p->tx_skb[i] = NULL;
++		}
++	}
++}
++
++static int rtl_init_rings(struct rtl_eth *p)
++{
++	unsigned int r, i;
++	int ret;
++
++	p->tx_head = 0;
++	p->tx_tail = 0;
++
++	memset(p->tx_ring, 0, RTL_RING_SIZE * sizeof(struct rtl_desc));
++	p->tx_ring[RTL_RING_SIZE - 1].opts1 = D_WRAP;
++	memset(p->tx_ring1, 0, RTL_TX_RING1_SIZE * sizeof(struct rtl_desc));
++	p->tx_ring1[RTL_TX_RING1_SIZE - 1].opts1 = D_WRAP;
++
++	for (r = 0; r < NUM_RX_RING; r++) {
++		p->rx_head[r] = 0;
++		memset(p->rx_ring[r], 0, RTL_RING_SIZE * sizeof(struct rtl_desc));
++		for (i = 0; i < RTL_RING_SIZE; i++) {
++			ret = rtl_alloc_rx_buf(p, r, i);
++			if (ret) {
++				rtl_free_rings(p);
++				return ret;
++			}
++		}
++	}
++
++	/*
++	 * Program the ring bases with UNCACHE_MASK (bit 29) set, exactly as the
++	 * SDK's New_swNic_init does:
++	 *   New_rxDescRing_base = ((u32)ring) | UNCACHE_MASK; REG32(CPURPDCR)=...
++	 * The swNic DMA engine wants the uncached-window form of the descriptor
++	 * ring address; writing the bare physical (bit 29 clear) makes the engine
++	 * fetch descriptors from the wrong place -- it never clears our OWN bits,
++	 * so RX never advances (rx_cdp stuck at the bare physical base, rx=0).
++	 * All six RX rings must be armed (see NUM_RX_RING) or a frame delivered to
++	 * an unconfigured ring corrupts memory.
++	 */
++	rtl_wr(p, CPUTPDCR(0), (u32)p->tx_ring_dma | UNCACHE_MASK);
++	rtl_wr(p, CPUTPDCR(1), (u32)p->tx_ring1_dma | UNCACHE_MASK);
++	for (r = 0; r < NUM_RX_RING; r++)
++		rtl_wr(p, CPURPDCR(r), (u32)p->rx_ring_dma[r] | UNCACHE_MASK);
++	rtl_wr(p, DMA_CR1, (RTL_RING_SIZE - 1) * sizeof(struct rtl_desc));
++	rtl_wr(p, DMA_CR4, DMA_CR4_TX0_TAIL_AWARE);
++	rtl_wr(p, TXRINGCR, TX_RING0_EN | TX_RING1_EN);
++	return 0;
++}
++
++static void rtl_tx_reap(struct rtl_eth *p)
++{
++	spin_lock(&p->tx_lock);
++	while (p->tx_tail != p->tx_head) {
++		struct rtl_desc *d = &p->tx_ring[p->tx_tail];
++
++		if (d->opts1 & D_OWN)	/* still owned by hw */
++			break;
++		if (p->tx_skb[p->tx_tail]) {
++			dma_unmap_single(p->dev, p->tx_buf_dma[p->tx_tail],
++					 p->tx_skb[p->tx_tail]->len,
++					 DMA_TO_DEVICE);
++			dev_consume_skb_any(p->tx_skb[p->tx_tail]);
++			p->tx_skb[p->tx_tail] = NULL;
++		}
++		p->tx_tail = (p->tx_tail + 1) % RTL_RING_SIZE;
++	}
++	spin_unlock(&p->tx_lock);
++
++	if (netif_queue_stopped(p->ndev))
++		netif_wake_queue(p->ndev);
++}
++
++static void rtl_link_log(struct rtl_eth *p);
++
++static int rtl_rx_poll(struct napi_struct *napi, int budget)
++{
++	struct rtl_eth *p = container_of(napi, struct rtl_eth, napi);
++	int done = 0;
++	int r;
++
++	rtl_tx_reap(p);
++	rtl_link_log(p);
++
++	/*
++	 * Drain the RX rings high->low, matching the SDK handler
++	 * (for ring_idx = MAX-1 .. 0). CPU-bound frames land on whichever ring
++	 * the switch's priority/queue map picked, so all six must be serviced.
++	 */
++	for (r = NUM_RX_RING - 1; r >= 0 && done < budget; r--) {
++		while (done < budget) {
++			unsigned int h = p->rx_head[r];
++			struct rtl_desc *d = &p->rx_ring[r][h];
++			struct sk_buff *skb = p->rx_skb[r][h];
++			unsigned int len;
++
++			if (skb) {
++				/* Armed slot: if hw still owns it, ring is drained. */
++				if (d->opts1 & D_OWN)
++					break;
++				len = (d->opts2 & RD_LEN_MASK);
++				p->rx_last_opts4 = d->opts4;
++				p->rx_last_spa = (d->opts4 >> RD_SPA_SH) &
++						 RD_SPA_MASK;
++				dma_unmap_single(p->dev, p->rx_buf_dma[r][h],
++						 RTL_BUF_SIZE, DMA_FROM_DEVICE);
++				if (len > 4 && len <= RTL_BUF_SIZE) {
++					len -= 4;	/* strip CRC */
++					skb_put(skb, len);
++					/*
++					 * RTL8197F CPU-tag hardware removes the native
++					 * RTL8367 4-byte tag and reports its source port
++					 * in opts4.SPA. Recreate the standard RTL8_4 RX
++					 * tag expected by the DSA core.
++					 */
++					skb_push(skb, RTL8_4_TAG_LEN);
++					memmove(skb->data, skb->data + RTL8_4_TAG_LEN,
++						2 * ETH_ALEN);
++					skb->data[12] = RTL8_4_ETHERTYPE >> 8;
++					skb->data[13] = RTL8_4_ETHERTYPE & 0xff;
++					skb->data[14] = RTL8_4_PROTOCOL;
++					skb->data[15] = 0;
++					skb->data[16] = 0;
++					skb->data[17] = 0;
++					skb->data[18] = 0;
++					skb->data[19] = p->rx_last_spa;
++					len += RTL8_4_TAG_LEN;
++					skb->protocol = eth_type_trans(skb, p->ndev);
++					p->ndev->stats.rx_packets++;
++					p->ndev->stats.rx_bytes += len;
++					napi_gro_receive(napi, skb);
++				} else {
++					p->ndev->stats.rx_errors++;
++					dev_kfree_skb_any(skb);
++				}
++				p->rx_skb[r][h] = NULL;
++			}
++			/*
++			 * (Re)arm this slot. skb==NULL here means either we just
++			 * consumed a packet or a previous refill failed; either way
++			 * retry the allocation. On failure stop and retry next poll --
++			 * never advance past an unarmed slot (that would desync
++			 * rx_head from the hw and later deref a NULL skb).
++			 */
++			if (rtl_alloc_rx_buf(p, r, h)) {
++				p->ndev->stats.rx_dropped++;
++				break;
++			}
++			p->rx_head[r] = (h + 1) % RTL_RING_SIZE;
++			done++;
++		}
++	}
++
++	if (done < budget) {
++		napi_complete_done(napi, done);
++		if (p->irq_mode) {
++			/*
++			 * Re-arm the NIC sources masked by the ISR. The safety
++			 * timer below still runs, so a lost interrupt costs one
++			 * extra second of latency rather than a stalled ring.
++			 */
++			rtl_wr(p, CPUIIMR, II_NAPI_SOURCES);
++			mod_timer(&p->poll_timer,
++				  jiffies + msecs_to_jiffies(RTL_SAFETY_MS));
++		} else {
++			mod_timer(&p->poll_timer,
++				  jiffies + msecs_to_jiffies(RTL_POLL_MS));
++		}
++	}
++	return done;
++}
++
++/*
++ * Switch-core interrupt (CPU IP4). Ack what is pending, mask the NIC sources
++ * that NAPI owns, and let rtl_rx_poll() re-arm them when it drains the rings.
++ */
++static irqreturn_t rtl_isr(int irq, void *dev_id)
++{
++	struct rtl_eth *p = dev_id;
++	u32 status = rtl_rd(p, CPUIISR);
++
++	if (!status)
++		return IRQ_NONE;
++
++	rtl_wr(p, CPUIISR, status);	/* write-1-to-clear */
++	rtl_wr(p, CPUIIMR, 0);
++	napi_schedule(&p->napi);
++	return IRQ_HANDLED;
++}
++
++/*
++ * Silence the switch core at both the NIC mask and the ictl, and wait for any
++ * in-flight handler. Must run before the rings are torn down, or a late
++ * interrupt schedules NAPI against freed state.
++ */
++static void rtl_irq_mask(struct rtl_eth *p)
++{
++	if (!p->irq_mode)
++		return;
++
++	writel(readl(p->sysreg + ICTL_GIMR) & ~ICTL_GIMR_SW_IE,
++	       p->sysreg + ICTL_GIMR);
++	rtl_wr(p, CPUIIMR, 0);
++	p->irq_mode = false;
++	synchronize_irq(p->irq);
++}
++
++static void rtl_poll_timer(struct timer_list *t)
++{
++	struct rtl_eth *p = timer_container_of(p, t, poll_timer);
++
++	napi_schedule(&p->napi);
++}
++
++static netdev_tx_t rtl_start_xmit(struct sk_buff *skb, struct net_device *ndev)
++{
++	struct rtl_eth *p = netdev_priv(ndev);
++	unsigned int idx, next, len;
++	u16 port_mask = 1;
++	struct rtl_desc *d;
++	dma_addr_t dma;
++
++	if (!p->dma_on) {	/* engine runtime-gated off: drop, never poke ring */
++		dev_kfree_skb_any(skb);
++		ndev->stats.tx_dropped++;
++		return NETDEV_TX_OK;
++	}
++
++	/* Preserve the exact frame handed to DMA.  Restrict capture to the
++	 * RTL8_4-tagged ARP used by the wired bring-up so background traffic
++	 * cannot overwrite the diagnostic before userspace reads it.
++	 */
++	if (skb->len >= 22 &&
++	    skb->data[12] == 0x88 && skb->data[13] == 0x99 &&
++	    skb->data[20] == 0x08 && skb->data[21] == 0x06) {
++		p->txcap_len = min_t(unsigned int, skb->len, RTL_TXCAP_SIZE);
++		memcpy(p->txcap, skb->data, p->txcap_len);
++		p->txcap_seq++;
++	}
++
++	/*
++	 * DSA supplies an RTL8_4 tag containing the destination user-port mask.
++	 * The vendor RTL8197F+RTL8367R path instead uses the swNic descriptor
++	 * port mask and lets P0GMIICR TX CPU-tag hardware emit the native 4-byte
++	 * wire tag. Preserve DSA's port selection, but remove its software tag
++	 * before handing the frame to DMA.
++	 */
++	if (likely(skb->len >= ETH_HLEN + RTL8_4_TAG_LEN &&
++		   skb->data[12] == (RTL8_4_ETHERTYPE >> 8) &&
++		   skb->data[13] == (RTL8_4_ETHERTYPE & 0xff) &&
++		   skb->data[14] == RTL8_4_PROTOCOL)) {
++		port_mask = ((u16)skb->data[18] << 8) | skb->data[19];
++		port_mask &= RTL8_4_RX_MASK;
++		if (!port_mask) {
++			dev_kfree_skb_any(skb);
++			ndev->stats.tx_dropped++;
++			return NETDEV_TX_OK;
++		}
++
++		memmove(skb->data + RTL8_4_TAG_LEN, skb->data, 2 * ETH_ALEN);
++		skb_pull(skb, RTL8_4_TAG_LEN);
++	}
++
++	len = skb->len;
++	if (len < 60)
++		len = 64;		/* min frame; hw pads */
++	else
++		len += 4;		/* + CRC */
++
++	dma = dma_map_single(p->dev, skb->data, skb->len, DMA_TO_DEVICE);
++	if (dma_mapping_error(p->dev, dma)) {
++		dev_kfree_skb_any(skb);
++		ndev->stats.tx_dropped++;
++		return NETDEV_TX_OK;
++	}
++
++	spin_lock(&p->tx_lock);
++	idx = p->tx_head;
++	next = (idx + 1) % RTL_RING_SIZE;
++	if (next == p->tx_tail) {		/* ring full */
++		spin_unlock(&p->tx_lock);
++		dma_unmap_single(p->dev, dma, skb->len, DMA_TO_DEVICE);
++		netif_stop_queue(ndev);
++		return NETDEV_TX_BUSY;
++	}
++
++	d = &p->tx_ring[idx];
++	p->tx_skb[idx] = skb;
++	p->tx_buf_dma[idx] = dma;
++
++	d->addr = (u32)dma;
++	d->opts2 = (len & TD_PHLEN_MASK) << TD_MLEN_SH;
++	d->opts3 = 0;
++	d->opts4 = (u32)port_mask << 24;
++	d->opts5 = 0;
++	d->opts1 = (idx == RTL_RING_SIZE - 1 ? D_WRAP : 0) | D_FS | D_LS |
++		   ((len & TD_PHLEN_MASK) << TD_PHLEN_SH);
++	wmb();			/* fields visible before OWN handover */
++	d->opts1 |= D_OWN;
++	p->tx_head = next;
++	spin_unlock(&p->tx_lock);
++
++	rtl_wr(p, CPUICR, rtl_rd(p, CPUICR) | TXFD);	/* kick */
++
++	ndev->stats.tx_packets++;
++	ndev->stats.tx_bytes += skb->len;
++	return NETDEV_TX_OK;
++}
++
++/* Internal-PHY MDIO via the SWMACCR MDC/MDIO controller. */
++static int rtl_mdio_wait(struct rtl_eth *p)
++{
++	unsigned int t = 10000;
++
++	while (t--) {
++		if (!(readl(p->swcore + SW_MDCIOSR) & MDC_STATUS_BUSY))
++			return 0;
++		udelay(1);
++	}
++	return -ETIMEDOUT;
++}
++
++static int rtl_mdio_read(struct rtl_eth *p, unsigned int phy, unsigned int reg)
++{
++	if (rtl_mdio_wait(p))
++		return -ETIMEDOUT;
++	writel((phy << MDC_PHYADD_SH) | (reg << MDC_REGADD_SH),
++	       p->swcore + SW_MDCIOCR);
++	if (rtl_mdio_wait(p))
++		return -ETIMEDOUT;
++	return readl(p->swcore + SW_MDCIOSR) & 0xffff;
++}
++
++static void rtl_mdio_write(struct rtl_eth *p, unsigned int phy,
++			   unsigned int reg, u16 val)
++{
++	if (rtl_mdio_wait(p))
++		return;
++	writel(MDC_CMD_WRITE | (phy << MDC_PHYADD_SH) |
++	       (reg << MDC_REGADD_SH) | val, p->swcore + SW_MDCIOCR);
++	rtl_mdio_wait(p);
++}
++
++/* Poll every internal PHY's link bit; log transitions so we can map physical
++ * ports to PHY addresses by moving the cable. */
++static void rtl_link_log(struct rtl_eth *p)
++{
++	unsigned int i;
++	u32 cdp, hw_idx;
++	u8 link = 0;
++
++	if (time_before(jiffies, p->next_link_log))
++		return;
++	p->next_link_log = jiffies + HZ;	/* re-check link ~1x/sec */
++
++	/* PHY link bitmap (read BMSR twice: link bit is latch-low). Bit N == PHY
++	 * addr N; the real internal GPHYs are at addr 1..4 (addr 0 has none). */
++	for (i = 0; i < RTL_NPORTS; i++) {
++		rtl_mdio_read(p, i, MII_BMSR);
++		if (rtl_mdio_read(p, i, MII_BMSR) & BMSR_LINK)
++			link |= BIT(i);
++	}
++
++	/* Edge-triggered: stay quiet unless the link bitmap changed (plug/unplug
++	 * a cable -> one line). link_seen holds the last-logged bitmap. */
++	if (link == (u8)p->link_seen)
++		return;
++	p->link_seen = link;
++
++	/* switch MIB per-port RX packet counters (do frames enter the switch?) +
++	 * RX engine progress (does the switch forward to the CPU?). */
++	cdp = rtl_rd(p, CPURPDCR(0));
++	hw_idx = (cdp - (u32)p->rx_ring_dma[0]) / sizeof(struct rtl_desc);
++
++	netdev_info(p->ndev,
++		    "LINK CHANGE link=0x%02x MIBrx=%u,%u,%u,%u,%u hw_idx=%u rx_pkts=%lu\n",
++		    link,
++		    readl(p->swcore + SW_MIB_RXPKT(0)),
++		    readl(p->swcore + SW_MIB_RXPKT(1)),
++		    readl(p->swcore + SW_MIB_RXPKT(2)),
++		    readl(p->swcore + SW_MIB_RXPKT(3)),
++		    readl(p->swcore + SW_MIB_RXPKT(4)),
++		    hw_idx, p->ndev->stats.rx_packets);
++}
++
++/* Paged internal-PHY register RMW (page select via reg 31; reg 30 for page>=31),
++ * matching the clean-room rtl865x_phy_page_reg_rmw. */
++static void rtl_phy_page_rmw(struct rtl_eth *p, int addr, int page, int reg,
++			     u16 clear, u16 set)
++{
++	u16 v = 0;
++
++	if (page >= 31) {
++		rtl_mdio_write(p, addr, 31, 7);
++		rtl_mdio_write(p, addr, 30, page);
++	} else {
++		rtl_mdio_write(p, addr, 31, page);
++	}
++	if (clear != 0xffff)
++		v = rtl_mdio_read(p, addr, reg) & ~clear;
++	rtl_mdio_write(p, addr, reg, v | set);
++	rtl_mdio_write(p, addr, 31, 0);
++}
++
++/*
++ * Internal-GPHY analog init. Ported from the clean-room rtl8196c_revb_fixup
++ * (same 001c:c8xx internal-PHY family); the 8197F's own analog patch lives in
++ * the bootloader and is lost when we (re-)clock the switch. EXPERIMENTAL: if the
++ * link still does not come up, an 8197F-specific patch is required.
++ */
++static void __maybe_unused rtl_phy_analog_init(struct rtl_eth *p)
++{
++	unsigned int i;
++
++	for (i = 0; i < RTL_NPORTS; i++)
++		writel(readl(p->swcore + SW_PORTCFG(i)) | SW_PORTCFG_FORCED_MODE,
++		       p->swcore + SW_PORTCFG(i));
++
++	for (i = 0; i < RTL_NPORTS; i++) {
++		rtl_phy_page_rmw(p, i, 1, 17, 7 << 10, 7 << 10);
++		rtl_phy_page_rmw(p, i, 4, 24, 0xff, 0xf3);
++		rtl_phy_page_rmw(p, i, 4, 16, 1 << 3, 1 << 3);
++		rtl_phy_page_rmw(p, i, 1, 19, 7 << 11, 2 << 11);
++		rtl_phy_page_rmw(p, i, 1, 23, 7 << 6, 4 << 6);
++		rtl_phy_page_rmw(p, i, 1, 18, 7 << 3, 6 << 3);
++	}
++
++	writel((readl(p->swcore + SW_MAC_CONFIG) & ~SW_CF_RXIPG_MASK) | 0x5,
++	       p->swcore + SW_MAC_CONFIG);
++	writel((readl(p->swcore + SW_MAC_CONFIG) &
++		~(SW_SELIPG_MASK << SW_SELIPG_SH)) |
++	       (SW_SELIPG_11 << SW_SELIPG_SH), p->swcore + SW_MAC_CONFIG);
++
++	for (i = 0; i < RTL_NPORTS; i++) {
++		rtl_phy_page_rmw(p, i, 0, 21, 0xff, 0x32);
++		rtl_phy_page_rmw(p, i, 0, 22, 7 << 4, 5 << 4);
++		rtl_phy_page_rmw(p, i, 0, 0, 1 << 9, 1 << 9);	/* aneg */
++		rtl_phy_page_rmw(p, i, 1, 17, 3 << 1, 3 << 1);
++		rtl_phy_page_rmw(p, i, 1, 18, 0xffff, 0x9004);
++		rtl_phy_page_rmw(p, i, 4, 26, 0xfff0, 0xff80);
++		rtl_phy_page_rmw(p, i, 0, 21, 1 << 14, 1 << 14);
++	}
++
++	for (i = 0; i < RTL_NPORTS; i++)
++		writel(readl(p->swcore + SW_PORTCFG(i)) & ~SW_PORTCFG_FORCED_MODE,
++		       p->swcore + SW_PORTCFG(i));
++
++	/* disable 10M power saving (reg 0x18 bit 15) */
++	for (i = 0; i < RTL_NPORTS; i++) {
++		int v = rtl_mdio_read(p, i, 0x18);
++
++		if (v != 0xffff)
++			rtl_mdio_write(p, i, 0x18, v & ~(1 << 15));
++	}
++}
++
++/*
++ * Bring up the on-SoC switch core (clean-room rtl865x_reset recipe from the
++ * hackpascal RE865X driver). Without this the switch never forwards LAN frames
++ * to the CPU port (the L2 engine is off and "to CPU" forwarding is disabled),
++ * which is why the CPU RX ring never advanced.
++ */
++static void __maybe_unused rtl_switch_init(struct rtl_eth *p)
++{
++	unsigned int i;
++
++	/*
++	 * NOTE: intentionally NO full switch reset (SW_RESET_FULL). The 8197F
++	 * internal GPHYs are analog-initialised by the bootloader; a full reset
++	 * loses that (the vendor re-applies a per-SoC PHY analog patch after
++	 * reset, which we do not have for 8197F) and the link never comes up.
++	 * We only (re)apply the forwarding/L2 config on top of the existing state.
++	 */
++
++	/* reset MIB counters */
++	writel(SW_MIB_ALL_RESTART, p->swcore + SW_MIB_CONTROL);
++
++	/* per LAN port: toggle the MAC reset and enable the PHY interface */
++	for (i = 0; i < RTL_NPORTS; i++) {
++		u32 v = readl(p->swcore + SW_PORTCFG(i));
++
++		writel(v & ~SW_PORTCFG_MAC_RESET_L, p->swcore + SW_PORTCFG(i));
++		writel((v & ~(0x1fu << SW_PORTCFG_EXTPHY_SH)) |
++		       (i << SW_PORTCFG_EXTPHY_SH) |
++		       SW_PORTCFG_PHYIF | SW_PORTCFG_MAC_RESET_L,
++		       p->swcore + SW_PORTCFG(i));
++	}
++
++	/* forward unknown-unicast + multicast/broadcast to the CPU port */
++	writel(readl(p->swcore + SW_FRAME_FWD_CFG) |
++	       SW_UNICAST_TO_CPU | SW_MULTICAST_TO_CPU,
++	       p->swcore + SW_FRAME_FWD_CFG);
++
++	/* VLAN ingress filter on all ports */
++	writel(SW_VLAN_INGRESS_ALL, p->swcore + SW_VLAN_CONTROL_0);
++
++	/* LAN decision by VLAN + trap unknown-VLAN/NAPT frames to the CPU */
++	{
++		u32 v = readl(p->swcore + SW_TABLE_CONTROL_0);
++
++		v &= ~(SW_LAN_DECISION_MASK << SW_LAN_DECISION_SH);
++		v |= SW_UNKNOWN_VLAN_TO_CPU | SW_UNKNOWN_NAPT_TO_CPU;
++		writel(v, p->swcore + SW_TABLE_CONTROL_0);
++	}
++
++	/* enable the L2 lookup engine (no forwarding happens without this) */
++	writel(readl(p->swcore + SW_MODULE_SW_CONTROL) | SW_L2_ENGINE_ENABLE,
++	       p->swcore + SW_MODULE_SW_CONTROL);
++
++	/*
++	 * REAL boot switch/GPHY init, reverse-engineered from the stock a2004m_ml
++	 * kernel via a purpose-built MIPS emulator that followed the boot NIC-init
++	 * call graph ("Probing RTL819X NIC" -> fn 0x807f7acc). The earlier leads
++	 * (SYS 0x64|=0x1f, page-2 analog, LX clocks) were NOT on the boot path.
++	 *   - fn 0x802281b0: switch port config + SYS 0x18000850 control.
++	 *   - fn 0x80228c3c: internal-GPHY paged (page 1) init + PHY reset/autoneg.
++	 */
++
++	/* switch port init (stock fn 0x802281b0) */
++	{
++		unsigned int pr;
++
++		for (pr = 0; pr < RTL_NPORTS; pr++) {
++			u32 v = readl(p->swcore + SW_PORTCFG(pr));
++
++			v = (v & 0x83ffdff6) | 0x14002009;
++			writel(v, p->swcore + SW_PORTCFG(pr));
++			v = readl(p->swcore + SW_PORTCFG(pr));
++			v = (v & 0xfd03ffff) | 0x02940000;
++			writel(v, p->swcore + SW_PORTCFG(pr));
++		}
++		writel(readl(p->swcore + 0x414c) & 0xfe7fffff, p->swcore + 0x414c);
++		writel((readl(p->swcore + 0x414c) & 0xfff3ffe8) | 0x000c0005,
++		       p->swcore + 0x414c);
++		writel(readl(p->swcore + 0x414c) | 0x06000000, p->swcore + 0x414c);
++		writel(readl(p->swcore + 0x414c) | 0x40, p->swcore + 0x414c);
++		writel(readl(p->swcore + 0x4058) | 1, p->swcore + 0x4058);
++		writel(readl(p->swcore + 0x4100) | 1, p->swcore + 0x4100);
++		writel(readl(p->swcore + SW_MAC_CONFIG) | 0x1000,
++		       p->swcore + SW_MAC_CONFIG);
++		/* SYS 0x18000850 control -- never programmed before */
++		writel((readl(p->sysreg + 0x850) & 0x01bfffff) | 0xd8000000,
++		       p->sysreg + 0x850);
++	}
++
++	/*
++	 * FULL internal-GPHY analog calibration (stock fn 0x80228c3c), captured
++	 * VERBATIM by emulating the boot NIC-init and logging every MDIO write:
++	 * a 32-entry paged (page 0/1/2) analog-register sequence. Our earlier
++	 * 3-register fragment was wildly incomplete -- THIS is the real init.
++	 * {page, reg, value}; applied in order to each internal GPHY.
++	 */
++	{
++		static const struct { u8 pg, reg; u16 val; } gphy_seq[] = {
++			{1, 0x1d, 0x0002}, {1, 0x1d, 0x0004},
++			{0, 0x00, 0x8000},			/* PHY reset */
++			{1, 0x17, 0x7000}, {1, 0x12, 0x0050},
++			{1, 0x10, 0xe000}, {1, 0x11, 0x3000}, {1, 0x10, 0x0000},
++			{0, 0x17, 0x0100}, {0, 0x18, 0x0000},
++			{2, 0x14, 0x0000}, {2, 0x10, 0x0c00}, {2, 0x1a, 0x0027},
++			{2, 0x15, 0x8000}, {2, 0x18, 0x0200}, {2, 0x14, 0x0c44},
++			{2, 0x1a, 0x0200}, {2, 0x19, 0x0658}, {2, 0x11, 0x0064},
++			{2, 0x12, 0x00c5}, {2, 0x13, 0x010f}, {2, 0x10, 0x00b2},
++			{2, 0x15, 0x01c8}, {2, 0x16, 0x011f}, {2, 0x17, 0x0064},
++			{2, 0x18, 0x0034}, {2, 0x1a, 0x7000}, {2, 0x13, 0x6000},
++			{2, 0x12, 0x2000}, {0, 0x18, 0x8000}, {2, 0x19, 0x0758},
++		};
++		static const u8 gphy_addr[] = { 1, 2, 3, 4, 8 };
++		unsigned int n, k;
++
++		for (n = 0; n < ARRAY_SIZE(gphy_addr); n++) {
++			u8 a = gphy_addr[n];
++			u8 cur = 0xff;
++
++			for (k = 0; k < ARRAY_SIZE(gphy_seq); k++) {
++				if (gphy_seq[k].pg != cur) {
++					cur = gphy_seq[k].pg;
++					rtl_mdio_write(p, a, 31, cur);
++				}
++				rtl_mdio_write(p, a, gphy_seq[k].reg,
++					       gphy_seq[k].val);
++			}
++			rtl_mdio_write(p, a, 31, 0x0000);	/* page 0 */
++		}
++		mdelay(20);
++		for (n = 0; n < ARRAY_SIZE(gphy_addr); n++) {
++			u8 a = gphy_addr[n];
++
++			rtl_mdio_write(p, a, MII_ADVERTISE, ADVERTISE_10_100_PAUSE);
++			rtl_mdio_write(p, a, MII_BMCR, BMCR_ANEG_RESTART);
++		}
++	}
++	(void)i;
++}
++
++static void rtl_dma_enable(struct rtl_eth *p);
++
++/*
++ * read-only diagnostic: dump the on-SoC switch port-config / GMIICR block + key
++ * SYS/strap regs, to trace whether the bootloader configures port5(RGMII)/ext
++ * ports and whether OpenWrt init later clears them. Called at the earliest
++ * initcall (bootloader state) and around eth probe / rtl_open.
++ */
++static void rtl_regdump(const char *when, void __iomem *sw, void __iomem *sys)
++{
++	int i;
++
++	pr_info("### a2004 regdump [%s] ###\n", when);
++	for (i = 0x4104; i <= 0x4124; i += 4)
++		pr_info("###  swcore %04x = 0x%08x%s\n", i, readl(sw + i),
++			i == 0x4118 ? "  PCRP5(port5/MII)" :
++			i == 0x411c ? "  PCRP6(extPort0/RGMII)" :
++			i == 0x4120 ? "  PCRP7(extPort1/CPU)" : "");
++	pr_info("###  P0GMIICR(414c)=0x%08x P5GMIICR(4150)=0x%08x MAC_CFG(4000)=0x%08x CVIDR(4200)=0x%08x\n",
++		readl(sw + 0x414c), readl(sw + 0x4150),
++		readl(sw + 0x4000), readl(sw + 0x4200));
++	pr_info("###  SYS STRAP(0008)=0x%08x SYS0850=0x%08x CLK_MANAGE(0010)=0x%08x\n",
++		readl(sys + 0x0008), readl(sys + 0x0850), readl(sys + 0x0010));
++}
++
++static int __init rtl_early_regdump(void)
++{
++	void __iomem *sw = ioremap(0x1b800000, 0x8000);
++	void __iomem *sys = ioremap(0x18000000, 0x4000);
++
++	if (sw && sys)
++		rtl_regdump("EARLY-initcall (bootloader/pre-driver state)", sw, sys);
++	if (sw)
++		iounmap(sw);
++	if (sys)
++		iounmap(sys);
++	return 0;
++}
++early_initcall(rtl_early_regdump);
++
++static void rtl_apply_a(struct rtl_eth *p);
++static void rtl_apply_fwd(struct rtl_eth *p);
++
++static int rtl_open(struct net_device *ndev)
++{
++	struct rtl_eth *p = netdev_priv(ndev);
++
++	rtl_regdump("OPEN-start (before clk/dma)", p->swcore, p->sysreg);
++	napi_enable(&p->napi);
++
++	/*
++	 * Enable the switch/NIC core clock (bit 11 of CLK_MANAGE) -- idempotent;
++	 * the bootloader already left it on because it uses the switch + external
++	 * RTL8367 for its own LAN recovery.
++	 *
++	 * Deliberately DO NOT reset or reconfigure the on-SoC switch here: the
++	 * bootloader has already set it up to bridge the CPU port <-> the RGMII
++	 * port that the external RTL8367 sits behind, which is exactly the path
++	 * DSA needs. Our old SW_RESET_FULL + GPHY-oriented rtl_switch_init tore
++	 * that bridge down (frames reached the RTL8367 but never the CPU NIC).
++	 */
++	writel(readl(p->sysreg + CLK_MANAGE) | CLK_MANAGE_SWITCH,
++	       p->sysreg + CLK_MANAGE);
++	mdelay(10);
++
++	rtl_apply_a(p);
++	rtl_apply_fwd(p);
++
++	netdev_info(ndev, "up: CVIDR=0x%08x FWD=0x%08x MSC=0x%08x\n",
++		    readl(p->swcore + SW_CVIDR),
++		    readl(p->swcore + SW_FRAME_FWD_CFG),
++		    readl(p->swcore + SW_MODULE_SW_CONTROL));
++
++	netif_start_queue(ndev);
++	timer_setup(&p->poll_timer, rtl_poll_timer, 0);
++	/* As the DSA conduit we must actually move frames: start the CPU-NIC
++	 * DMA engine now (it is stable). RX/TX rings + poll timer come up here;
++	 * the switch (on-SoC) bridges the CPU port to the RGMII port that the
++	 * external RTL8367 (managed by the rtl8365mb DSA driver) sits behind. */
++	rtl_dma_enable(p);
++	rtl_regdump("OPEN-end (after clk/dma)", p->swcore, p->sysreg);
++	return 0;
++}
++
++static int rtl_stop(struct net_device *ndev)
++{
++	struct rtl_eth *p = netdev_priv(ndev);
++
++	netif_stop_queue(ndev);
++	p->dma_on = false;
++	rtl_irq_mask(p);
++	timer_delete_sync(&p->poll_timer);
++	napi_disable(&p->napi);
++	rtl_wr(p, CPUICR, rtl_rd(p, CPUICR) & ~(TXCMD | RXCMD));
++	rtl_free_rings(p);
++	return 0;
++}
++
++static const struct net_device_ops rtl_netdev_ops = {
++	.ndo_open = rtl_open,
++	.ndo_stop = rtl_stop,
++	.ndo_start_xmit = rtl_start_xmit,
++	.ndo_set_mac_address = eth_mac_addr,
++	.ndo_validate_addr = eth_validate_addr,
++};
++
++/*
++ * On-demand PHY status, read live via MDIO (no PHY reset). Read it any time
++ * with:  cat /sys/devices/platform/18010000.ethernet/phy
++ * Reports BMSR, current link (latch cleared by the double read) and
++ * autoneg-done for each internal GPHY (addr 1..4).
++ */
++static ssize_t phy_show(struct device *dev, struct device_attribute *attr,
++			char *buf)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++	int a, bmsr, n = 0;
++
++	for (a = 1; a <= 4; a++) {
++		rtl_mdio_read(p, a, MII_BMSR);		/* clear latch */
++		bmsr = rtl_mdio_read(p, a, MII_BMSR) & 0xffff;
++		n += sprintf(buf + n,
++			     "phy%d bmsr=0x%04x link=%d aneg_done=%d\n",
++			     a, bmsr, !!(bmsr & BMSR_LINK), !!(bmsr & 0x20));
++	}
++	return n;
++}
++static DEVICE_ATTR_RO(phy);
++
++/*
++ * Interactive MDIO poke (no rebuild needed to experiment):
++ *   echo "PHY REG"     > .../mdio ; cat .../mdio   -> read  (PHY,REG decimal)
++ *   echo "PHY REG VAL" > .../mdio                  -> write (VAL hex, no 0x)
++ * e.g.  echo "1 1"     -> read  phy1 BMSR
++ *       echo "1 0 1200"-> write phy1 BMCR = autoneg-restart
++ * Results also go to dmesg.
++ */
++static ssize_t mdio_show(struct device *dev, struct device_attribute *attr,
++			 char *buf)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++
++	return sprintf(buf, "0x%04x\n", p->mdio_last);
++}
++
++static ssize_t mdio_store(struct device *dev, struct device_attribute *attr,
++			  const char *buf, size_t len)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++	unsigned int phy, reg, val;
++	int n;
++
++	n = sscanf(buf, "%u %u %x", &phy, &reg, &val);
++	if (n < 2 || phy > 31 || reg > 31)
++		return -EINVAL;
++
++	if (n == 2) {
++		p->mdio_last = rtl_mdio_read(p, phy, reg) & 0xffff;
++		dev_info(dev, "mdio rd phy%u reg%u = 0x%04x\n",
++			 phy, reg, p->mdio_last);
++	} else {
++		rtl_mdio_write(p, phy, reg, val);
++		dev_info(dev, "mdio wr phy%u reg%u <= 0x%04x\n", phy, reg, val);
++	}
++	return len;
++}
++static DEVICE_ATTR_RW(mdio);
++
++/*
++ * Interactive raw SoC register poke (32-bit), for replaying the bootcode's
++ * switch/GPHY bring-up live:
++ *   echo "ADDR"     > .../reg ; cat .../reg   -> read  (ADDR hex phys)
++ *   echo "ADDR VAL" > .../reg                 -> write (both hex)
++ * e.g.  echo 1800005c > reg ; cat reg   (SYS_GPHY_CTRL)
++ *       echo "1b804104 427f0038" > reg  (port0 config, force mode)
++ * Addresses inside the driver's already-mapped windows reuse those maps;
++ * anything else is ioremap'd for the single access.
++ */
++static void __iomem *rtl_resolve(struct rtl_eth *p, u32 addr,
++				 void __iomem **tofree)
++{
++	*tofree = NULL;
++	if (addr >= SYSREG_BASE_PHYS && addr < SYSREG_BASE_PHYS + SYSREG_SIZE)
++		return p->sysreg + (addr - SYSREG_BASE_PHYS);
++	if (addr >= 0x18010000 && addr < 0x18010200)
++		return p->base + (addr - 0x18010000);
++	if (addr >= SWCORE_BASE_PHYS && addr < SWCORE_BASE_PHYS + SWCORE_SIZE)
++		return p->swcore + (addr - SWCORE_BASE_PHYS);
++	*tofree = ioremap(addr, 4);
++	return *tofree;
++}
++
++static ssize_t reg_show(struct device *dev, struct device_attribute *attr,
++			char *buf)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++
++	return sprintf(buf, "0x%08x\n", p->reg_last);
++}
++
++static ssize_t reg_store(struct device *dev, struct device_attribute *attr,
++			 const char *buf, size_t len)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++	void __iomem *m, *tofree;
++	unsigned int addr, val;
++	int n;
++
++	n = sscanf(buf, "%x %x", &addr, &val);
++	if (n < 1 || (addr & 3))
++		return -EINVAL;
++
++	m = rtl_resolve(p, addr, &tofree);
++	if (!m)
++		return -ENOMEM;
++
++	if (n == 1) {
++		p->reg_last = readl(m);
++		dev_info(dev, "reg rd 0x%08x = 0x%08x\n", addr, p->reg_last);
++	} else {
++		writel(val, m);
++		dev_info(dev, "reg wr 0x%08x <= 0x%08x\n", addr, val);
++	}
++	if (tofree)
++		iounmap(tofree);
++	return len;
++}
++static DEVICE_ATTR_RW(reg);
++
++/* ------------------------------------------------------------------ *
++ * External RTL8367 switch: GPIO-bit-banged SMI (2-wire).
++ *
++ * The A2004MU's physical LAN/WAN ports are on an EXTERNAL RTL8367R
++ * (chip id 0x6367), reached over RGMII + a software SMI clocked on two
++ * GPIO pins.  Their exact pin numbers are compiled into the stock kernel;
++ * we discover them empirically: sweep GPIO-configured pins in ports A-D,
++ * read RTL8367 CHIP_NUMBER (reg 0x1300 -> 0x6367) for each candidate pair.
++ *
++ * GPIO block lives at 0x18003500 (inside the sysreg window):
++ *   ports A-D: CNR +0x00, DIR +0x08, DAT +0x0C ; bit = port*8 + pin
++ *   ports E-H: CNR +0x1C, DIR +0x24, DAT +0x28 ; bit = (port-4)*8 + pin
++ *   CNR bit 0 = GPIO function ; DIR 1 = output.  gpioId = port<<8 | pin.
++ * ------------------------------------------------------------------ */
++#define GPIO_BLK 0x3500
++static const u8 gp_cnr[2] = { 0x00, 0x1c };
++static const u8 gp_dir[2] = { 0x08, 0x24 };
++static const u8 gp_dat[2] = { 0x0c, 0x28 };
++#define GP_BLK(id) (((id) >> 8) < 4 ? 0 : 1)
++#define GP_BIT(id) (((((id) >> 8) & 3) * 8) + ((id) & 7))
++
++static inline void gp_wb(struct rtl_eth *p, u8 off, u32 bit, int set)
++{
++	void __iomem *r = p->sysreg + GPIO_BLK + off;
++	u32 v = readl(r);
++
++	if (set)
++		v |= (1u << bit);
++	else
++		v &= ~(1u << bit);
++	writel(v, r);
++}
++static void gp_out(struct rtl_eth *p, u16 id)		/* GPIO mux, dir=out */
++{
++	gp_wb(p, gp_cnr[GP_BLK(id)], GP_BIT(id), 0);
++	gp_wb(p, gp_dir[GP_BLK(id)], GP_BIT(id), 1);
++}
++static void gp_in(struct rtl_eth *p, u16 id)		/* GPIO mux, dir=in */
++{
++	gp_wb(p, gp_cnr[GP_BLK(id)], GP_BIT(id), 0);
++	gp_wb(p, gp_dir[GP_BLK(id)], GP_BIT(id), 0);
++}
++static void gp_set(struct rtl_eth *p, u16 id, int v)
++{
++	gp_wb(p, gp_dat[GP_BLK(id)], GP_BIT(id), v);
++}
++static int gp_get(struct rtl_eth *p, u16 id)
++{
++	return (readl(p->sysreg + GPIO_BLK + gp_dat[GP_BLK(id)])
++		>> GP_BIT(id)) & 1;
++}
++
++#define SMI_DLY() udelay(3)
++#define SCK (p->smi_sck)
++#define SDA (p->smi_sda)
++
++static void smi_start(struct rtl_eth *p)
++{
++	gp_out(p, SDA); gp_out(p, SCK);
++	gp_set(p, SCK, 0); gp_set(p, SDA, 1); SMI_DLY();
++	gp_set(p, SCK, 1); SMI_DLY(); gp_set(p, SCK, 0); SMI_DLY();
++	gp_set(p, SCK, 1); SMI_DLY(); gp_set(p, SDA, 0); SMI_DLY();
++	gp_set(p, SCK, 0); SMI_DLY(); gp_set(p, SDA, 1);
++}
++static void smi_stop(struct rtl_eth *p)
++{
++	SMI_DLY(); gp_set(p, SDA, 0); gp_set(p, SCK, 1);
++	SMI_DLY(); gp_set(p, SDA, 1); SMI_DLY(); gp_set(p, SCK, 1);
++	SMI_DLY(); gp_set(p, SCK, 0); SMI_DLY(); gp_set(p, SCK, 1);
++	SMI_DLY(); gp_set(p, SCK, 0); SMI_DLY(); gp_set(p, SCK, 1);
++	gp_in(p, SDA); gp_in(p, SCK);
++}
++static void smi_wbit(struct rtl_eth *p, u16 sig, int len)
++{
++	for (; len > 0; len--) {
++		SMI_DLY();
++		gp_set(p, SDA, (sig >> (len - 1)) & 1); SMI_DLY();
++		gp_set(p, SCK, 1); SMI_DLY(); gp_set(p, SCK, 0);
++	}
++}
++static void smi_rbit(struct rtl_eth *p, int len, u32 *rd)
++{
++	u32 u;
++
++	gp_in(p, SDA);
++	for (*rd = 0; len > 0; len--) {
++		SMI_DLY(); gp_set(p, SCK, 1); SMI_DLY();
++		u = gp_get(p, SDA); gp_set(p, SCK, 0);
++		*rd |= (u << (len - 1));
++	}
++	gp_out(p, SDA);
++}
++/* Read a 16-bit RTL8367 register (bit-bang SMI).  Returns 0 if every
++ * transaction phase was ACKed by a device (i.e. a switch is really there). */
++static int smi_read_reg(struct rtl_eth *p, u32 addr, u32 *val)
++{
++	u32 ack, raw;
++	int con, ret = 0;
++
++	smi_start(p);
++	smi_wbit(p, 0xB, 4);			/* CTRL_CODE (RTL8367) */
++	smi_wbit(p, 0x4, 3);
++	smi_wbit(p, 0x1, 1);			/* issue READ */
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_wbit(p, addr & 0xff, 8);		/* reg_addr[7:0] */
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_wbit(p, (addr >> 8) & 0xff, 8);	/* reg_addr[15:8] */
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_rbit(p, 8, &raw); *val = raw & 0xff;		/* data[7:0] */
++	smi_wbit(p, 0x00, 1);					/* CPU ACK */
++	smi_rbit(p, 8, &raw); *val |= (raw & 0xff) << 8;	/* data[15:8] */
++	smi_wbit(p, 0x01, 1);					/* CPU NACK */
++	smi_stop(p);
++	return ret;
++}
++
++/* Write a 16-bit RTL8367 register (bit-bang SMI). */
++static int smi_write_reg(struct rtl_eth *p, u32 addr, u32 data)
++{
++	u32 ack;
++	int con, ret = 0;
++
++	smi_start(p);
++	smi_wbit(p, 0xB, 4);
++	smi_wbit(p, 0x4, 3);
++	smi_wbit(p, 0x0, 1);			/* issue WRITE */
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_wbit(p, addr & 0xff, 8);
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_wbit(p, (addr >> 8) & 0xff, 8);
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_wbit(p, data & 0xff, 8);		/* data[7:0] */
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_wbit(p, (data >> 8) & 0xff, 8);	/* data[15:8] */
++	con = 0; do { con++; smi_rbit(p, 1, &ack); } while (ack && con < 5);
++	if (ack) ret = -1;
++	smi_stop(p);
++	return ret;
++}
++
++static void smi_dump_gpio(struct rtl_eth *p, struct device *dev)
++{
++	dev_info(dev, "GPIO A-D: CNR=%08x DIR=%08x DAT=%08x\n",
++		 readl(p->sysreg + GPIO_BLK + 0x00),
++		 readl(p->sysreg + GPIO_BLK + 0x08),
++		 readl(p->sysreg + GPIO_BLK + 0x0c));
++	dev_info(dev, "GPIO E-H: CNR=%08x DIR=%08x DAT=%08x\n",
++		 readl(p->sysreg + GPIO_BLK + 0x1c),
++		 readl(p->sysreg + GPIO_BLK + 0x24),
++		 readl(p->sysreg + GPIO_BLK + 0x28));
++}
++
++/* commands via  echo ... > .../smi :
++ *   dump                    - print GPIO A-H control/dir/data
++ *   read  <sck> <sda> <reg> - one SMI read (pins are linear 0-63, reg hex)
++ *   sweep                   - try every GPIO-configured A-D pin pair,
++ *                             report any that returns 0x6367 at reg 0x1300
++ *   id                      - read RTL8367 chip number/version/mode
++ *   ports                   - read per-port link status (reg 0x1352+port)
++ *   sr <reg>                - read one switch register (hex)
++ *   sw <reg> <val>          - write one switch register (both hex)
++ * (sr/sw/id/ports use the discovered pins: SCK=pin18 SDA=pin19)
++ */
++static ssize_t smi_store(struct device *dev, struct device_attribute *attr,
++			 const char *buf, size_t len)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++	unsigned int a, b, r;
++	u32 val;
++
++	if (!strncmp(buf, "dump", 4)) {
++		smi_dump_gpio(p, dev);
++		return len;
++	}
++	if (sscanf(buf, "read %u %u %x", &a, &b, &r) == 3) {
++		p->smi_sck = ((a / 8) << 8) | (a % 8);
++		p->smi_sda = ((b / 8) << 8) | (b % 8);
++		val = 0xdead;
++		r = smi_read_reg(p, r, &val);
++		dev_info(dev, "SMI sck=%u sda=%u reg -> 0x%04x (ack=%s)\n",
++			 a, b, val, r ? "no" : "yes");
++		return len;
++	}
++	if (!strncmp(buf, "sweep", 5)) {
++		u32 sv_cnr, sv_dir, sv_dat;
++		int cand[32], nc = 0, i, j, pin, hits = 0;
++		u32 cnr = readl(p->sysreg + GPIO_BLK + 0x00);
++
++		smi_dump_gpio(p, dev);
++		sv_cnr = cnr;
++		sv_dir = readl(p->sysreg + GPIO_BLK + 0x08);
++		sv_dat = readl(p->sysreg + GPIO_BLK + 0x0c);
++
++		/* candidates: ports A-D pins currently muxed as GPIO (CNR bit 0) */
++		for (pin = 0; pin < 32; pin++)
++			if (!((cnr >> pin) & 1))
++				cand[nc++] = pin;
++		dev_info(dev, "SMI sweep: %d GPIO-mode pins in A-D\n", nc);
++
++		for (i = 0; i < nc && hits < 4; i++) {
++			for (j = 0; j < nc; j++) {
++				if (i == j)
++					continue;
++				p->smi_sck = ((cand[i] / 8) << 8) | (cand[i] % 8);
++				p->smi_sda = ((cand[j] / 8) << 8) | (cand[j] % 8);
++				val = 0;
++				smi_read_reg(p, 0x1300, &val);
++				if (val == 0x6367) {
++					dev_info(dev, "*** RTL8367 FOUND: SCK=pin%d SDA=pin%d (reg0x1300=0x%04x) ***\n",
++						 cand[i], cand[j], val);
++					hits++;
++				}
++			}
++		}
++		/* restore ports A-D exactly as the bootloader left them */
++		writel(sv_cnr, p->sysreg + GPIO_BLK + 0x00);
++		writel(sv_dir, p->sysreg + GPIO_BLK + 0x08);
++		writel(sv_dat, p->sysreg + GPIO_BLK + 0x0c);
++		if (!hits)
++			dev_info(dev, "SMI sweep: no 0x6367 among A-D GPIO pins\n");
++		return len;
++	}
++	if (!strncmp(buf, "id", 2)) {
++		u32 num = 0, ver = 0, mode = 0;
++
++		smi_read_reg(p, 0x1300, &num);
++		smi_read_reg(p, 0x1301, &ver);
++		smi_read_reg(p, 0x1302, &mode);
++		dev_info(dev, "RTL8367 chip_num=0x%04x ver=0x%04x mode=0x%04x\n",
++			 num, ver, mode);
++		return len;
++	}
++	if (!strncmp(buf, "ports", 5)) {
++		int pt;
++
++		for (pt = 0; pt <= 6; pt++) {
++			u32 st = 0;
++
++			smi_read_reg(p, 0x1352 + pt, &st);
++			dev_info(dev, "port%d status=0x%04x link=%d speed=%d duplex=%d\n",
++				 pt, st, !!(st & 0x10), st & 3, !!(st & 4));
++		}
++		return len;
++	}
++	if (sscanf(buf, "sr %x", &r) == 1) {
++		val = 0;
++		a = smi_read_reg(p, r, &val);
++		dev_info(dev, "SMI switch reg 0x%04x = 0x%04x (ack=%s)\n",
++			 r, val, a ? "no" : "yes");
++		return len;
++	}
++	if (sscanf(buf, "sw %x %x", &r, &val) == 2) {
++		a = smi_write_reg(p, r, val);
++		dev_info(dev, "SMI switch reg 0x%04x <= 0x%04x (ack=%s)\n",
++			 r, val, a ? "no" : "yes");
++		return len;
++	}
++	if (!strncmp(buf, "rgmiisweep", 10)) {
++		/* Empirically find the ext-port RGMII delay (RTL8367B_EXT_RGMXF_REG
++		 * 0x1306/0x1307: TXDELAY bit3, RXDELAY bits0-2) that lets frames
++		 * actually cross to the SoC.  Run a continuous ping on the LAN while
++		 * this sweeps; a delay that receives anything is reported. */
++		int d;
++		unsigned long b;
++
++		dev_info(dev, "RGMII delay sweep starting (ping the router now)\n");
++		for (d = 0; d < 16; d++) {
++			b = ndev->stats.rx_packets + ndev->stats.rx_errors;
++			smi_write_reg(p, 0x1306, d);
++			smi_write_reg(p, 0x1307, d);
++			mdelay(900);
++			if (ndev->stats.rx_packets + ndev->stats.rx_errors > b)
++				dev_info(dev, "*** RGMII delay=0x%x GOT FRAMES rx=%lu err=%lu ***\n",
++					 d, ndev->stats.rx_packets,
++					 ndev->stats.rx_errors);
++		}
++		dev_info(dev, "RGMII delay sweep done\n");
++		return len;
++	}
++	return -EINVAL;
++}
++static DEVICE_ATTR_WO(smi);
++
++/* ------------------------------------------------------------------ *
++ * Runtime-gated CPU-NIC DMA engine.  Kept OFF at boot (a bad enable
++ * used to scribble kernel memory); enable/disable/inspect at runtime so
++ * a misfire only needs a reboot, never bricks the boot.  Now that the
++ * datapath is understood (frames flow LAN -> ext RTL8367 -> RGMII ->
++ * on-SoC switch CPU port -> this DMA ring), turn it on and watch RX/TX.
++ *   echo on   > .../dma   - init rings, start engine + switch TRX, arm poll
++ *   echo off  > .../dma   - stop engine, free rings
++ *   echo stat > .../dma   - dump engine/ring/counter state
++ * ------------------------------------------------------------------ */
++static void rtl_dma_enable(struct rtl_eth *p)
++{
++	if (p->dma_on)
++		return;
++
++	/*
++	 * RTL8197F splits NIC Tx/Rx over two Lexra buses when CPUICR1 bit 0 is
++	 * set.  The vendor SDK enables the LX2 clock and arbiter before setting
++	 * that bit; without them Rx works but Tx descriptors never complete.
++	 */
++	writel(readl(p->sysreg + CLK_MANAGE) |
++	       CLK_MANAGE_LX2_CLK | CLK_MANAGE_LX2_ARB,
++	       p->sysreg + CLK_MANAGE);
++	writel(readl(p->swcore + SW_MAC_CTRL1) |
++	       SW_CMAC_CLK_SEL | SW_CMAC_LATPKT_EN,
++	       p->swcore + SW_MAC_CTRL1);
++
++	if (rtl_init_rings(p)) {
++		netdev_err(p->ndev, "DMA enable: ring alloc failed\n");
++		return;
++	}
++	rtl_wr(p, CPUICR1, rtl_rd(p, CPUICR1) |
++	       CPUICR1_TXRX_DIV_LX | CPUICR1_LITTLE_ENDIAN |
++	       CPUICR1_TSO_ID | CPUICR1_NEW_DESC);
++	rtl_wr(p, CPUICR, CPUICR_ENABLE);
++	/*
++	 * Updating CPUICR's burst-size field resets RTL8197F HiFifoMark to
++	 * 0x57.  Match rtl865x_start() by restoring both marks afterwards.
++	 */
++	rtl_wr(p, DMA_CR0, (rtl_rd(p, DMA_CR0) & ~0xffffu) | 0xa0a0);
++	/* start normal TX/RX in the switch core (SIRR TRXRDY). */
++	writel(readl(p->swcore + SW_SIRR) | SIRR_TRXRDY, p->swcore + SW_SIRR);
++	p->dma_on = true;
++
++	/*
++	 * Bring up interrupt-driven RX only once the rings are armed. The ictl
++	 * source stays masked until the NIC's own mask is programmed, so a
++	 * status bit left over from the bootloader cannot storm us on IP4.
++	 */
++	if (p->irq >= 0) {
++		u32 irr1;
++
++		rtl_wr(p, CPUIISR, rtl_rd(p, CPUIISR));
++		rtl_wr(p, CPUIIMR, II_NAPI_SOURCES);
++
++		irr1 = readl(p->sysreg + ICTL_IRR1);
++		irr1 = (irr1 & ~ICTL_IRR1_SRC15_MASK) | ICTL_IRR1_SRC15_IP;
++		writel(irr1, p->sysreg + ICTL_IRR1);
++		writel(readl(p->sysreg + ICTL_GIMR) | ICTL_GIMR_SW_IE,
++		       p->sysreg + ICTL_GIMR);
++		p->irq_mode = true;
++	}
++	mod_timer(&p->poll_timer, jiffies + msecs_to_jiffies(p->irq_mode ?
++							     RTL_SAFETY_MS :
++							     RTL_POLL_MS));
++	netdev_info(p->ndev,
++		    "DMA ENABLED (%s): CPUICR=0x%08x rxbase=0x%08x txbase=0x%08x\n",
++		    p->irq_mode ? "irq" : "polled",
++		    rtl_rd(p, CPUICR), rtl_rd(p, CPURPDCR(0)),
++		    rtl_rd(p, CPUTPDCR(0)));
++}
++static void rtl_dma_disable(struct rtl_eth *p)
++{
++	if (!p->dma_on)
++		return;
++	p->dma_on = false;
++	rtl_irq_mask(p);
++	timer_delete_sync(&p->poll_timer);
++	rtl_wr(p, CPUICR, rtl_rd(p, CPUICR) & ~(TXCMD | RXCMD));
++	rtl_free_rings(p);
++	netdev_info(p->ndev, "DMA DISABLED\n");
++}
++/*
++ * Verbatim stock on-SoC switch init, captured from the vendor kernel boot via
++ * the MIPS emulator (swcore-relative offset, value).  Replayed to reproduce the
++ * exact ALE/VLAN-table/forwarding/MAC config that makes frames from the RGMII
++ * port (-> external RTL8367) reach the CPU port.  Entry 0 is SW_RESET_FULL.
++ */
++static const struct { u16 off; u32 val; } stock_swinit[] = {
++	{ 0x4204, 0x00000004 }, { 0x4504, 0x01b201c4 }, { 0x4508, 0x01800190 },
++	{ 0x4104, 0x00000000 }, { 0x4108, 0x00000000 }, { 0x410c, 0x00000000 },
++	{ 0x4110, 0x00000000 }, { 0x4114, 0x00000000 }, { 0x7014, 0x00000000 },
++	{ 0x4704, 0x00010001 }, { 0x4708, 0x00010001 }, { 0x470c, 0x00010001 },
++	{ 0x4710, 0x00000000 }, { 0x457c, 0x00fc00ff }, { 0x4580, 0x00fc00ff },
++	{ 0x4584, 0x00fc00ff }, { 0x45dc, 0x00000000 }, { 0x45dc, 0x00000001 },
++	{ 0x45dc, 0x00000000 }, { 0x7014, 0x00000000 }, { 0x4704, 0x00000000 },
++	{ 0x4708, 0x00000000 }, { 0x470c, 0x00000000 }, { 0x4710, 0x00000000 },
++	{ 0x4104, 0x00000000 }, { 0x4108, 0x00000000 }, { 0x410c, 0x00000000 },
++	{ 0x4110, 0x00000000 }, { 0x4114, 0x00000000 }, { 0x4104, 0x02000000 },
++	{ 0x4108, 0x02000000 }, { 0x410c, 0x02000000 }, { 0x4110, 0x02000000 },
++	{ 0x4114, 0x02000000 }, { 0x4000, 0x00000480 }, { 0x4104, 0x00000000 },
++	{ 0x4108, 0x00000000 }, { 0x410c, 0x00000000 }, { 0x4110, 0x00000000 },
++	{ 0x4114, 0x00000000 }, { 0x441c, 0x00000400 }, { 0x441c, 0x00000c00 },
++	{ 0x4410, 0x00000000 }, { 0x4410, 0x00000000 }, { 0x4410, 0x00000000 },
++	{ 0x4400, 0x00000003 }, { 0x4418, 0x00040000 }, { 0x4d20, 0x00008000 },
++	{ 0x4d24, 0x00000000 }, { 0x4d28, 0x00000001 }, { 0x4d2c, 0x00000000 },
++	{ 0x4d30, 0x00000000 }, { 0x4d08, 0xbb040000 }, { 0x4d00, 0x00000009 },
++	{ 0x4418, 0x00000000 }, { 0x4418, 0x00040000 }, { 0x4d20, 0x00008000 },
++	{ 0x4d08, 0xbb040020 }, { 0x4d00, 0x00000009 }, { 0x4418, 0x00000000 },
++	{ 0x4418, 0x00040000 }, { 0x4d20, 0x00008000 }, { 0x4d08, 0xbb040040 },
++	{ 0x4d00, 0x00000009 }, { 0x4418, 0x00000000 }, { 0x4418, 0x00040000 },
++	{ 0x4d20, 0x00008000 }, { 0x4d08, 0xbb040060 }, { 0x4d00, 0x00000009 },
++	{ 0x4418, 0x00000000 }, { 0x4418, 0x00040000 }, { 0x4d20, 0x00008000 },
++	{ 0x4d08, 0xbb040080 }, { 0x4d00, 0x00000009 }, { 0x4418, 0x00000000 },
++	{ 0x4234, 0x00000000 }, { 0x4234, 0x00000024 }, { 0x4418, 0x00040000 },
++	{ 0x4d20, 0xbb800000 }, { 0x4d08, 0xbb0c0000 }, { 0x4d00, 0x00000009 },
++	{ 0x4418, 0x00000000 }, { 0x4418, 0x00040000 }, { 0x4d20, 0xbb800000 },
++	{ 0x4d08, 0xbb0c0020 }, { 0x4d00, 0x00000009 }, { 0x4418, 0x00000000 },
++	{ 0x4418, 0x00040000 }, { 0x4d20, 0xbb800000 }, { 0x4d08, 0xbb0c0040 },
++	{ 0x4d00, 0x00000009 }, { 0x4418, 0x00000000 }, { 0x4418, 0x00040000 },
++	{ 0x4d20, 0xbb800000 }, { 0x4d08, 0xbb0c0060 }, { 0x4d00, 0x00000009 },
++	{ 0x4418, 0x00000000 }, { 0x4418, 0x00040000 }, { 0x4d20, 0xbb800000 },
++	{ 0x4d08, 0xbb0c0080 }, { 0x4d00, 0x00000009 }, { 0x4418, 0x00000000 },
++	{ 0x4418, 0x00040000 }, { 0x4d20, 0x5a5a5a5a }, { 0x4d08, 0xbb000000 },
++	{ 0x4d00, 0x00000009 }, { 0x4418, 0x00000000 }, { 0x4418, 0x00040000 },
++	{ 0x4d20, 0x5a5a5a5a }, { 0x4d08, 0xbb0e0000 }, { 0x4d00, 0x00000009 },
++	{ 0x4418, 0x00000000 }, { 0x4410, 0x00000000 }, { 0x4408, 0x00000000 },
++	{ 0x4300, 0x00200000 }, { 0x1000, 0x0007ffff }, { 0x4418, 0x00000000 },
++	{ 0x4a00, 0x00000000 }, { 0x4418, 0x00000000 }, { 0x4418, 0x00004000 },
++	{ 0x4418, 0x00004000 }, { 0x4428, 0x00000000 }, { 0x4428, 0x00000001 },
++	{ 0x4048, 0x00000000 }, { 0x4048, 0x00000000 }, { 0x4048, 0x00000000 },
++	{ 0x4048, 0x00000010 }, { 0x4048, 0x00000030 }, { 0x4a1c, 0x00000000 },
++	{ 0x4a20, 0x00000000 }, { 0x4a24, 0x00000000 }, { 0x4a28, 0x00000000 },
++	{ 0x4a2c, 0x00000000 }, { 0x4104, 0x00000030 }, { 0x4108, 0x00000030 },
++	{ 0x410c, 0x00000030 }, { 0x4110, 0x00000030 }, { 0x4114, 0x00000030 },
++	{ 0x4704, 0x00000000 }, { 0x4710, 0x00000000 }, { 0x48b0, 0x00000000 },
++	{ 0x4704, 0x00000000 }, { 0x4710, 0x00000000 }, { 0x48bc, 0x00000000 },
++	{ 0x4708, 0x00000000 }, { 0x4710, 0x00000000 }, { 0x48c8, 0x00000000 },
++	{ 0x4708, 0x00000000 }, { 0x4710, 0x00000000 }, { 0x48d4, 0x00000000 },
++	{ 0x470c, 0x00000000 }, { 0x4710, 0x00000000 }, { 0x470c, 0x00000000 },
++	{ 0x4710, 0x00000000 }, { 0x4104, 0x00030030 }, { 0x4108, 0x00030030 },
++	{ 0x410c, 0x00030030 }, { 0x4110, 0x00030030 }, { 0x4114, 0x00030030 },
++};
++static void rtl_stock_swinit(struct rtl_eth *p)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(stock_swinit); i++) {
++		writel(stock_swinit[i].val, p->swcore + stock_swinit[i].off);
++		if (i == 0)
++			mdelay(50);	/* let SW_RESET_FULL settle */
++		else
++			udelay(20);	/* let indirect table ops complete */
++	}
++	/* start normal TX/RX (SIRR TRXRDY), clearing any residual reset bit. */
++	writel(SIRR_TRXRDY, p->swcore + SW_SIRR);
++	netdev_info(p->ndev, "stock swinit replayed (%u writes)\n",
++		    (unsigned int)ARRAY_SIZE(stock_swinit));
++}
++
++static ssize_t dma_store(struct device *dev, struct device_attribute *attr,
++			 const char *buf, size_t len)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++
++	if (!strncmp(buf, "on", 2)) {
++		rtl_dma_enable(p);
++	} else if (!strncmp(buf, "swinit", 6)) {
++		/* replay the exact stock on-SoC switch init, then (re)start DMA */
++		bool was_on = p->dma_on;
++
++		rtl_dma_disable(p);
++		rtl_stock_swinit(p);
++		if (was_on)
++			rtl_dma_enable(p);
++	} else if (!strncmp(buf, "off", 3)) {
++		rtl_dma_disable(p);
++	} else if (!strncmp(buf, "stat", 4)) {
++		/* Per-ring cdp so we can see WHICH of the 6 RX rings the switch
++		 * delivers CPU-bound frames to (cdp advances off its base). */
++		netdev_info(ndev,
++			    "dma_on=%d CPUICR=0x%08x rx=%lu tx=%lu txdrop=%lu rxerr=%lu rxdrop=%lu\n",
++			    p->dma_on, rtl_rd(p, CPUICR),
++			    ndev->stats.rx_packets, ndev->stats.tx_packets,
++			    ndev->stats.tx_dropped, ndev->stats.rx_errors,
++			    ndev->stats.rx_dropped);
++		netdev_info(ndev,
++			    "rx_cdp[0..5]=%08x %08x %08x %08x %08x %08x base[0]=%08x head[0]=%u\n",
++			    rtl_rd(p, CPURPDCR(0)), rtl_rd(p, CPURPDCR(1)),
++			    rtl_rd(p, CPURPDCR(2)), rtl_rd(p, CPURPDCR(3)),
++			    rtl_rd(p, CPURPDCR(4)), rtl_rd(p, CPURPDCR(5)),
++			    (u32)p->rx_ring_dma[0], p->rx_head[0]);
++	} else {
++		return -EINVAL;
++	}
++	return len;
++}
++static DEVICE_ATTR_WO(dma);
++
++/*
++ * read-only packet-path probe (segments 3+4). CORRECT on-SoC switch MIB map from
++ * SDK rtl865xc_asicregs.h: MIB_COUNTER_BASE=SWCORE+0x1000, per-port stride 0x80,
++ * IN counters at +0x100 (ifInOctets +0x00, ifInUcastPkts +0x08,
++ * etherStatsBroadcastPkts +0x40, etherStatsDropEvents +0x48), OUT at +0x800
++ * (ifOutOctets +0x00). The old SW_MIB_RXPKT(0x1084) map was a GLOBAL counter
++ * (RX_PKTS_1), which is why it read 0 even under known TX. Do NOT write
++ * MIB_CONTROL(0x1000) here -- 0x7ffff = ALL_COUNTER_RESTART (zeros counters).
++ * cat before and after the ARP burst; delta computed off-board.
++ */
++static ssize_t probe_show(struct device *dev, struct device_attribute *attr,
++			  char *buf)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++	int len = 0, port, i;
++
++	len += sysfs_emit_at(buf, len,
++		"[SEG3 on-SoC RTL8197F switch MIB base=0x1b801000 stride=0x80]\n");
++	for (port = 0; port <= 8; port++) {
++		u32 in = 0x1100 + port * 0x80;	/* IN block  */
++		u32 out = 0x1800 + port * 0x80;	/* OUT block */
++
++		len += sysfs_emit_at(buf, len,
++			"P%d iOct=%u iUc=%u iBc=%u iDrop=%u oOct=%u | FCS=%u Sym=%u rxDV=%u\n", port,
++			readl(p->swcore + in + 0x00),	/* ifInOctets */
++			readl(p->swcore + in + 0x08),	/* ifInUcastPkts */
++			readl(p->swcore + in + 0x40),	/* etherStatsBroadcastPkts */
++			readl(p->swcore + in + 0x48),	/* etherStatsDropEvents */
++			readl(p->swcore + out + 0x00),	/* ifOutOctets */
++			readl(p->swcore + in + 0x4c),	/* dot3StatsFCSErrors */
++			readl(p->swcore + in + 0x50),	/* dot3StatsSymbolErrors */
++			readl(p->swcore + in + 0x5c));	/* inRxDvcnt (RX_DV assertions) */
++	}
++	len += sysfs_emit_at(buf, len,
++		"[SEG4 swNic] CPUICR=0x%08x RPDCR0=0x%08x IISR=0x%08x rx=%lu rxerr=%lu dma_on=%d rx_opts4=0x%08x spa=%u\n",
++		rtl_rd(p, CPUICR), rtl_rd(p, CPURPDCR(0)), rtl_rd(p, CPUIISR),
++		ndev->stats.rx_packets, ndev->stats.rx_errors, p->dma_on,
++		p->rx_last_opts4, p->rx_last_spa);
++	len += sysfs_emit_at(buf, len, "rxd0 OWN:");
++	for (i = 0; i < 8; i++)
++		len += sysfs_emit_at(buf, len, " %d:%d(%08x)", i,
++			!!(p->rx_ring[0][i].opts1 & D_OWN), p->rx_ring[0][i].opts1);
++	len += sysfs_emit_at(buf, len, "\n");
++	len += sysfs_emit_at(buf, len,
++			     "TPDCR0=0x%08x TPDCR1=0x%08x txd OWN:",
++			     rtl_rd(p, CPUTPDCR(0)), rtl_rd(p, CPUTPDCR(1)));
++	for (i = 0; i < 4; i++)
++		len += sysfs_emit_at(buf, len, " %d:%d(%08x)", i,
++			!!(p->tx_ring[i].opts1 & D_OWN), p->tx_ring[i].opts1);
++	len += sysfs_emit_at(buf, len, "\n");
++	/* on-SoC switch port config/status (SDK: PCRP=0x4104+n*4, PSRP=0x4128+n*4,
++	 * P0GMIICR=0x414c, P5GMIICR=0x4150). PSRP bit4=LinkUp, [1:0]=speed. */
++	len += sysfs_emit_at(buf, len, "[SEG5 on-SoC ports] P0GMIICR=0x%08x P5GMIICR=0x%08x\n",
++		readl(p->swcore + 0x414c), readl(p->swcore + 0x4150));
++	for (i = 0; i <= 7; i++)
++		len += sysfs_emit_at(buf, len, "P%d PCRP=0x%08x PSRP=0x%08x link=%d spd=%d\n", i,
++			readl(p->swcore + 0x4104 + i * 4),
++			readl(p->swcore + 0x4128 + i * 4),
++			!!(readl(p->swcore + 0x4128 + i * 4) & 0x10),
++			readl(p->swcore + 0x4128 + i * 4) & 3);
++	return len;
++}
++static DEVICE_ATTR_RO(probe);
++
++/*
++ * A-only diagnostic: apply the stock port0 RGMII/CPU-tag bring-up (fn 0x802281b0)
++ * verbatim RMW sequence, in exact stock order, dumping the 6 key regs before/after.
++ * Reboot-recoverable. `echo go > applyA`. Forwarding tables are NOT touched here.
++ */
++static void rtl_apply_a(struct rtl_eth *p)
++{
++	void __iomem *sw = p->swcore, *sys = p->sysreg;
++	u32 v;
++
++	pr_info("### applyA BEFORE MACCR(4000)=0x%08x MACCR1(4058)=0x%08x PITCR(4100)=0x%08x PCRP0(4104)=0x%08x P0GMIICR(414c)=0x%08x SYS850=0x%08x\n",
++		readl(sw + 0x4000), readl(sw + 0x4058), readl(sw + 0x4100),
++		readl(sw + 0x4104), readl(sw + 0x414c), readl(sys + 0x850));
++
++	/* 1. PCRP0 force-link 1000full (two-step RMW) */
++	v = readl(sw + 0x4104); writel((v & 0x83ffdff6) | 0x14002009, sw + 0x4104);
++	v = readl(sw + 0x4104); writel((v & 0xfd03ffff) | 0x02940000, sw + 0x4104);
++	/* 2. P0GMIICR mode/timing (clear GMAC, set RCOMP/TCOMP/RGTXC) */
++	v = readl(sw + 0x414c); writel(v & 0xfe7fffff, sw + 0x414c);
++	v = readl(sw + 0x414c); writel((v & 0xfff3ffe8) | 0x000c0005, sw + 0x414c);
++	/* 3. Match the vendor RTL8197F+RTL8367R path: translate between the
++	 * RTL8367 native 4-byte CPU tag and swNic descriptor port metadata.
++	 */
++	v = readl(sw + SW_P0GMIICR);
++	writel(v | P0GMIICR_CPU_TAG | P0GMIICR_TX_CPU_TAG,
++	       sw + SW_P0GMIICR);
++	/* 4. MACCR1 PORT0_ROUTER_MODE (bit0) */
++	v = readl(sw + 0x4058); writel(v | 0x1, sw + 0x4058);
++	/* 5. PITCR Port0 external interface GMII/MII/RGMII (bit0) */
++	v = readl(sw + 0x4100); writel(v | 0x1, sw + 0x4100);
++	/* 6. MACCR bit12 (idempotent) */
++	v = readl(sw + 0x4000); writel(v | 0x1000, sw + 0x4000);
++	/* 7. P0GMIICR Conf_done (bit6) -- LAST, after all port0 config */
++	v = readl(sw + 0x414c); writel(v | 0x40, sw + 0x414c);
++	/* 8. SYS 0x850 pinmux/RGMII */
++	v = readl(sys + 0x850); writel((v & 0x01bfffff) | 0xd8000000, sys + 0x850);
++
++	pr_info("### applyA AFTER  MACCR(4000)=0x%08x MACCR1(4058)=0x%08x PITCR(4100)=0x%08x PCRP0(4104)=0x%08x P0GMIICR(414c)=0x%08x SYS850=0x%08x\n",
++		readl(sw + 0x4000), readl(sw + 0x4058), readl(sw + 0x4100),
++		readl(sw + 0x4104), readl(sw + 0x414c), readl(sys + 0x850));
++}
++
++static ssize_t applyA_store(struct device *dev, struct device_attribute *attr,
++			    const char *buf, size_t len)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++
++	if (strncmp(buf, "go", 2))
++		return -EINVAL;
++
++	rtl_apply_a(p);
++	return len;
++}
++static DEVICE_ATTR_WO(applyA);
++
++/* indirect ASIC table access (SWTAA=0x4d08 addr, data 0x4d20+, SWTACR=0x4d00
++ * cmd; CMD_FORCE|ACTION_START=0x09 to write, 0x01 to read; poll ACTION_DONE=bit0;
++ * SWTCR0=0x4418 STOP_TLU=bit18 held during programming). */
++static void rtl_tbl_wr(void __iomem *sw, u32 swtaa, const u32 *d, int n)
++{
++	int i;
++
++	for (i = 0; i < n; i++)
++		writel(d[i], sw + 0x4d20 + i * 4);
++	writel(swtaa, sw + 0x4d08);
++	writel(0x09, sw + 0x4d00);
++	for (i = 0; i < 2000 && (readl(sw + 0x4d00) & 1); i++)
++		udelay(1);
++}
++static __maybe_unused void rtl_tbl_rd(void __iomem *sw, u32 swtaa, u32 *d, int n)
++{
++	int i;
++
++	writel(swtaa, sw + 0x4d08);
++	writel(0x01, sw + 0x4d00);
++	for (i = 0; i < 2000 && (readl(sw + 0x4d00) & 1); i++)
++		udelay(1);
++	for (i = 0; i < n; i++)
++		d[i] = readl(sw + 0x4d20 + i * 4);
++}
++
++/*
++ * applyFwd: VLAN 1 (member=Port0+CPU Ext2, both untagged), Port0 PVID=1,
++ * netif idx0 valid (vid=1, MAC=eth0, enHWRoute=0).  RTL8197F maps the logical
++ * CPU port to hardware extension-port bit 8; without it, VLAN-classified ingress
++ * cannot reach swNic.  Full readback. `echo go`.
++ */
++static void rtl_apply_fwd(struct rtl_eth *p)
++{
++	void __iomem *sw = p->swcore;
++	const u8 *mac = p->ndev->dev_addr;
++	u32 vlan[5] = { 0 }, netif[8] = { 0 };
++	u32 mac47_19, mac18_0, swtcr0;
++	void __iomem *tbl;
++	u16 mtu = 1536;
++	int i;
++
++	/* member=BIT0|BIT8 (0x101), egressUntag=(BIT0|BIT8)<<9 (0x20200) */
++	vlan[0] = 0x00020301;
++
++	/* netif idx0: valid, vid=1, MAC=eth0, enHWRoute=0, macMask(1 MAC)=L1/H3, mtu */
++	mac47_19 = ((u32)mac[0] << 21) | ((u32)mac[1] << 13) | ((u32)mac[2] << 5) | ((u32)mac[3] >> 3);
++	mac18_0  = ((u32)(mac[3] & 7) << 16) | ((u32)mac[4] << 8) | mac[5];
++	netif[0] = 0x1 | (1u << 1) | (mac18_0 << 13);		/* valid|vid|mac18_0 */
++	netif[1] = (mac47_19 & 0x1fffffff);			/* mac47_19; enHWRoute=0 */
++	netif[2] = (1u << 31);					/* macMaskL=1 (ACL start/end=0) */
++	netif[3] = 3u | ((u32)mtu << 2) | ((u32)mtu << 17);	/* macMaskH=3 | mtu | mtuV6 */
++
++	/* STOP_TLU and WAIT for STOP_TLU_READY (bit19) before the first table access
++	 * -- this was the bug: without the wait the first (VLAN) write was dropped. */
++	swtcr0 = readl(sw + 0x4418);
++	writel(swtcr0 | 0x00040000, sw + 0x4418);		/* EN_STOP_TLU (bit18) */
++	for (i = 0; i < 2000 && !(readl(sw + 0x4418) & 0x00080000); i++)
++		udelay(1);					/* STOP_TLU_READY (bit19) */
++	rtl_tbl_wr(sw, 0xbb060020, vlan, 3);			/* VLAN VID=1 (size 3) */
++	rtl_tbl_wr(sw, 0xbb040000, netif, 5);			/* NETIF idx=0 (size 5) */
++	writel(swtcr0, sw + 0x4418);				/* resume TLU */
++
++	/* Port0 PVID=1 (PVCR0 bits[11:0], port0 even) */
++	writel((readl(sw + 0x4a08) & ~0xfffu) | 1u, sw + 0x4a08);
++	/* Match the proven SDK-style ingress state: no per-port VLAN ingress
++	 * filtering, and send multicast/broadcast traffic to the CPU path. */
++	writel(0, sw + SW_VLAN_CONTROL_0);
++	writel(readl(sw + SW_FRAME_FWD_CFG) | SW_MULTICAST_TO_CPU,
++	       sw + SW_FRAME_FWD_CFG);
++
++	/* ---- readback: tables are memory-mapped at SWTABLE 0x1b000000 (direct read) ---- */
++	pr_info("### applyFwd MAC=%pM mtu=%u\n", mac, mtu);
++	pr_info("### applyFwd WROTE vlan0=0x%08x netif=[0x%08x 0x%08x 0x%08x 0x%08x]\n",
++		vlan[0], netif[0], netif[1], netif[2], netif[3]);
++	tbl = ioremap(0x1b000000, 0x100000);
++	if (tbl) {
++		pr_info("### applyFwd RB VLAN vid1 w0=0x%08x (expect 0x20301)\n",
++			readl(tbl + 0x60020));
++		pr_info("### applyFwd RB NETIF idx0 = 0x%08x 0x%08x 0x%08x 0x%08x\n",
++			readl(tbl + 0x40000), readl(tbl + 0x40004),
++			readl(tbl + 0x40008), readl(tbl + 0x4000c));
++		iounmap(tbl);
++	}
++	pr_info("### applyFwd PVCR0(4a08)=0x%08x FFCR(4428)=0x%08x SWTCR0(4418)=0x%08x PLITIMR(4420)=0x%08x\n",
++		readl(sw + 0x4a08), readl(sw + 0x4428), readl(sw + 0x4418), readl(sw + 0x4420));
++}
++
++static ssize_t applyFwd_store(struct device *dev, struct device_attribute *attr,
++			      const char *buf, size_t len)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++
++	if (strncmp(buf, "go", 2))
++		return -EINVAL;
++
++	rtl_apply_fwd(p);
++	return len;
++}
++static DEVICE_ATTR_WO(applyFwd);
++
++static ssize_t txcap_show(struct device *dev, struct device_attribute *attr,
++			  char *buf)
++{
++	struct net_device *ndev = dev_get_drvdata(dev);
++	struct rtl_eth *p = netdev_priv(ndev);
++	unsigned int off, len, seq;
++	ssize_t pos = 0;
++
++	spin_lock_bh(&p->tx_lock);
++	len = p->txcap_len;
++	seq = p->txcap_seq;
++	pos += sysfs_emit_at(buf, pos, "seq=%u len=%u\n", seq, len);
++	for (off = 0; off < len; off += 16) {
++		unsigned int n = min_t(unsigned int, 16, len - off);
++
++		pos += sysfs_emit_at(buf, pos, "%04x: %*ph\n",
++				     off, n, p->txcap + off);
++	}
++	spin_unlock_bh(&p->tx_lock);
++
++	return pos;
++}
++static DEVICE_ATTR_RO(txcap);
++
++static int rtl_eth_probe(struct platform_device *pdev)
++{
++	struct net_device *ndev;
++	struct rtl_eth *p;
++	int ret;
++	unsigned int i;
++
++	ndev = devm_alloc_etherdev(&pdev->dev, sizeof(*p));
++	if (!ndev)
++		return -ENOMEM;
++
++	SET_NETDEV_DEV(ndev, &pdev->dev);
++	platform_set_drvdata(pdev, ndev);
++
++	p = netdev_priv(ndev);
++	p->ndev = ndev;
++	p->dev = &pdev->dev;
++	/* the zeroed priv would read as IRQ 0; stay polled until one is claimed */
++	p->irq = -1;
++	spin_lock_init(&p->tx_lock);
++
++	/* External RTL8367 SMI pins, discovered empirically (sweep): pin18=portC.2
++	 * = SCK, pin19=portC.3 = SDA.  gpioId = port<<8 | pin. */
++	p->smi_sck = (2 << 8) | 2;
++	p->smi_sda = (2 << 8) | 3;
++
++	p->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(p->base))
++		return PTR_ERR(p->base);
++
++	/* Fixed SoC blocks needed to start the engine: the system register
++	 * block (switch/NIC core clock gate) and the switch core (SIRR). */
++	p->sysreg = devm_ioremap(&pdev->dev, SYSREG_BASE_PHYS, SYSREG_SIZE);
++	p->swcore = devm_ioremap(&pdev->dev, SWCORE_BASE_PHYS, SWCORE_SIZE);
++	if (!p->sysreg || !p->swcore)
++		return -ENOMEM;
++
++	rtl_regdump("ETH-PROBE (before any eth switch access)", p->swcore, p->sysreg);
++
++	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++
++	for (i = 0; i < NUM_RX_RING; i++) {
++		p->rx_ring[i] = dmam_alloc_coherent(&pdev->dev,
++					 RTL_RING_SIZE * sizeof(struct rtl_desc),
++					 &p->rx_ring_dma[i], GFP_KERNEL);
++		if (!p->rx_ring[i])
++			return -ENOMEM;
++	}
++	p->tx_ring = dmam_alloc_coherent(&pdev->dev,
++					 RTL_RING_SIZE * sizeof(struct rtl_desc),
++					 &p->tx_ring_dma, GFP_KERNEL);
++	if (!p->tx_ring)
++		return -ENOMEM;
++	p->tx_ring1 = dmam_alloc_coherent(&pdev->dev,
++					  RTL_TX_RING1_SIZE * sizeof(struct rtl_desc),
++					  &p->tx_ring1_dma, GFP_KERNEL);
++	if (!p->tx_ring1)
++		return -ENOMEM;
++
++	ret = of_get_ethdev_address(pdev->dev.of_node, ndev);
++	if (ret == -EPROBE_DEFER)
++		return ret;
++	if (ret)
++		eth_hw_addr_random(ndev);
++
++	ndev->netdev_ops = &rtl_netdev_ops;
++	/* Allow the extra headroom DSA needs for its CPU tag (rtl8365mb uses an
++	 * 8-byte RTL8_4 tag): as the DSA conduit we must accept MTU 1508. The
++	 * 2 KB RX buffers already hold it. */
++	ndev->max_mtu = RTL_BUF_SIZE - ETH_HLEN - ETH_FCS_LEN;
++	netif_napi_add(ndev, &p->napi, rtl_rx_poll);
++
++	/*
++	 * The switch core is wired straight to a CPU IP (see the ictl comment
++	 * near ICTL_GIMR), so this is a plain cpuintc interrupt. Claim it here
++	 * but leave it masked at the ictl until rtl_dma_enable() arms the rings;
++	 * if the DT carries no interrupt we fall back to the old polled timer.
++	 */
++	p->irq = platform_get_irq_optional(pdev, 0);
++	if (p->irq >= 0) {
++		ret = devm_request_irq(&pdev->dev, p->irq, rtl_isr, 0,
++				       dev_name(&pdev->dev), p);
++		if (ret) {
++			dev_warn(&pdev->dev,
++				 "IRQ %d unavailable (%d), falling back to polling\n",
++				 p->irq, ret);
++			p->irq = -1;
++		}
++	}
++
++	ret = devm_register_netdev(&pdev->dev, ndev);
++	if (ret)
++		return ret;
++
++	/* on-demand PHY status + interactive MDIO poke files */
++	device_create_file(&pdev->dev, &dev_attr_phy);
++	device_create_file(&pdev->dev, &dev_attr_mdio);
++	device_create_file(&pdev->dev, &dev_attr_reg);
++	device_create_file(&pdev->dev, &dev_attr_smi);
++	device_create_file(&pdev->dev, &dev_attr_dma);
++	device_create_file(&pdev->dev, &dev_attr_probe);
++	device_create_file(&pdev->dev, &dev_attr_applyA);
++	device_create_file(&pdev->dev, &dev_attr_applyFwd);
++	device_create_file(&pdev->dev, &dev_attr_txcap);
++
++	dev_info(&pdev->dev, "Realtek RTL8197F CPU NIC at %pR (%s)\n",
++		 platform_get_resource(pdev, IORESOURCE_MEM, 0),
++		 p->irq >= 0 ? "irq" : "polled");
++	return 0;
++}
++
++static const struct of_device_id rtl_eth_of_match[] = {
++	{ .compatible = "realtek,rtl8197f-eth" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rtl_eth_of_match);
++
++static struct platform_driver rtl_eth_driver = {
++	.probe = rtl_eth_probe,
++	.driver = {
++		.name = "rtl8197f-eth",
++		.of_match_table = rtl_eth_of_match,
++	},
++};
++module_platform_driver(rtl_eth_driver);
++
++MODULE_DESCRIPTION("Realtek RTL8197F CPU NIC (swNic) driver");
++MODULE_LICENSE("GPL");
+diff --git a/target/linux/rtl819x/files/drivers/pci/controller/pcie-rtl8197f.c b/target/linux/rtl819x/files/drivers/pci/controller/pcie-rtl8197f.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc9127c9f925b590af0a70c1448ba2f13dfd5c37
+--- /dev/null
++++ b/target/linux/rtl819x/files/drivers/pci/controller/pcie-rtl8197f.c
+@@ -0,0 +1,264 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Realtek RTL8197F PCIe root complex.
++ *
++ * The SoC exposes a single-lane root port with a companion Wi-Fi endpoint
++ * (RTL8822BE on the ipTIME A2004MU) hard-wired to it. Bring-up was validated on
++ * hardware by poking the registers below directly: the link reaches LTSSM L0 and
++ * the endpoint answers config reads with 10ec:b822.
++ *
++ * Config space is split into two windows. The root port's own registers live at
++ * the "rc" window and only tolerate 32-bit accesses, so both windows are driven
++ * through the PCI core's 32-bit accessors. The endpoint sits on bus 1 in its own
++ * window, indexed by function. Nothing deeper than bus 1 exists on this SoC.
++ */
++
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <linux/of.h>
++#include <linux/pci.h>
++#include <linux/platform_device.h>
++
++/* System register block. */
++#define SYS_STRAP		0x008
++#define SYS_STRAP_PCIE_40MHZ	BIT(24)
++#define SYS_CLK_MANAGE		0x010
++#define SYS_CLK_PCIE		(BIT(12) | BIT(13) | BIT(18))
++#define SYS_CLK_PCIE_ACTIVE	BIT(14)
++#define SYS_ENABLE		0x050
++#define SYS_ENABLE_PERST	BIT(1)		/* endpoint PERST#, active low */
++#define SYS_PCIE_PHY		0x100
++#define SYS_PCIE_PHY_MDIO_RST	BIT(0)
++#define SYS_PCIE_PHY_LOAD_DONE	BIT(1)
++#define SYS_PCIE_PHY_ON		BIT(3)
++
++/*
++ * The SoC interrupt controller shares the system register window. It routes
++ * each source to a CPU interrupt line; the PCIe source is GISR bit 21 and the
++ * BSP gives it CPU IP5. IRR2 covers sources 16..23 in 4-bit fields, so source
++ * 21 lands in bits 23:20. This mirrors what the ethernet driver does for the
++ * switch core on IP4 -- neither needs the (still unwired) ictl cascade.
++ */
++#define ICTL_GIMR		0x3000
++#define ICTL_GIMR_PCIE_IE	BIT(21)
++#define ICTL_IRR2		0x3010
++#define ICTL_IRR2_PCIE_MASK	(0xfu << 20)
++#define ICTL_IRR2_PCIE_IP	(5u << 20)
++
++/* Root-complex extended registers. */
++#define PCIE_EXT_MDIO		0x00
++#define PCIE_MDIO_WRITE		BIT(0)
++#define PCIE_MDIO_REG_SHIFT	8
++#define PCIE_MDIO_DATA_SHIFT	16
++#define PCIE_EXT_PWRCR		0x08
++#define PCIE_PWRCR_LTSSM_EN	BIT(0)
++#define PCIE_PWRCR_PHY_RST	BIT(7)
++
++/* Root-complex config space. */
++#define PCIE_RC_LINK_STATUS	0x728
++#define PCIE_LTSSM_MASK		0x1f
++#define PCIE_LTSSM_L0		0x11
++
++#define PCIE_EP_FUNC_SHIFT	12
++#define PCIE_LINK_WAIT_MS	100
++
++struct rtl8197f_pcie {
++	void __iomem *rc_cfg;
++	void __iomem *rc_ext;
++	void __iomem *ep_cfg;
++	void __iomem *sysreg;
++	struct device *dev;
++};
++
++static void __iomem *rtl8197f_pcie_map_bus(struct pci_bus *bus,
++					   unsigned int devfn, int where)
++{
++	struct rtl8197f_pcie *pcie = bus->sysdata;
++
++	/* Root port: one device, one function. */
++	if (bus->number == 0) {
++		if (PCI_SLOT(devfn) || PCI_FUNC(devfn))
++			return NULL;
++		return pcie->rc_cfg + where;
++	}
++
++	/* The single downstream device. */
++	if (bus->number == 1) {
++		if (PCI_SLOT(devfn))
++			return NULL;
++		return pcie->ep_cfg + (PCI_FUNC(devfn) << PCIE_EP_FUNC_SHIFT) +
++		       where;
++	}
++
++	return NULL;
++}
++
++static struct pci_ops rtl8197f_pcie_ops = {
++	.map_bus = rtl8197f_pcie_map_bus,
++	.read	 = pci_generic_config_read32,
++	.write	 = pci_generic_config_write32,
++};
++
++static void rtl8197f_pcie_phy_write(struct rtl8197f_pcie *pcie, u8 reg, u16 val)
++{
++	writel(((u32)val << PCIE_MDIO_DATA_SHIFT) |
++	       ((u32)(reg & 0x1f) << PCIE_MDIO_REG_SHIFT) | PCIE_MDIO_WRITE,
++	       pcie->rc_ext + PCIE_EXT_MDIO);
++	udelay(100);
++}
++
++/* Release the PHY from reset with the link trainer enabled. */
++static void rtl8197f_pcie_phy_reset(struct rtl8197f_pcie *pcie)
++{
++	writel(PCIE_PWRCR_LTSSM_EN, pcie->rc_ext + PCIE_EXT_PWRCR);
++	writel(PCIE_PWRCR_LTSSM_EN | PCIE_PWRCR_PHY_RST,
++	       pcie->rc_ext + PCIE_EXT_PWRCR);
++}
++
++static void rtl8197f_pcie_phy_setup(struct rtl8197f_pcie *pcie)
++{
++	/* The reference clock the board strapped decides the PHY tuning. */
++	if (readl(pcie->sysreg + SYS_STRAP) & SYS_STRAP_PCIE_40MHZ) {
++		rtl8197f_pcie_phy_write(pcie, 0x0f, 0x12f6);
++		rtl8197f_pcie_phy_write(pcie, 0x00, 0x0071);
++		rtl8197f_pcie_phy_write(pcie, 0x06, 0x1ac1);
++	} else {
++		rtl8197f_pcie_phy_write(pcie, 0x00, 0x0071);
++		rtl8197f_pcie_phy_write(pcie, 0x06, 0x18c1);
++	}
++}
++
++static int rtl8197f_pcie_wait_link(struct rtl8197f_pcie *pcie)
++{
++	unsigned int i;
++	u32 val;
++
++	for (i = 0; i < PCIE_LINK_WAIT_MS / 10; i++) {
++		val = readl(pcie->rc_cfg + PCIE_RC_LINK_STATUS);
++		if ((val & PCIE_LTSSM_MASK) == PCIE_LTSSM_L0)
++			return 0;
++		msleep(10);
++	}
++
++	dev_err(pcie->dev, "link training failed, LTSSM 0x%02x\n",
++		val & PCIE_LTSSM_MASK);
++	return -ETIMEDOUT;
++}
++
++static int rtl8197f_pcie_hw_init(struct rtl8197f_pcie *pcie)
++{
++	u32 val;
++
++	/* Ungate the PCIe block, then mark port 0 active. */
++	val = readl(pcie->sysreg + SYS_CLK_MANAGE);
++	writel(val | SYS_CLK_PCIE, pcie->sysreg + SYS_CLK_MANAGE);
++	val = readl(pcie->sysreg + SYS_CLK_MANAGE);
++	writel(val | SYS_CLK_PCIE_ACTIVE, pcie->sysreg + SYS_CLK_MANAGE);
++	usleep_range(10000, 11000);
++
++	/* MDIO block out of reset, then latch the parameter set. */
++	writel(SYS_PCIE_PHY_ON, pcie->sysreg + SYS_PCIE_PHY);
++	writel(SYS_PCIE_PHY_ON | SYS_PCIE_PHY_MDIO_RST,
++	       pcie->sysreg + SYS_PCIE_PHY);
++	writel(SYS_PCIE_PHY_ON | SYS_PCIE_PHY_MDIO_RST | SYS_PCIE_PHY_LOAD_DONE,
++	       pcie->sysreg + SYS_PCIE_PHY);
++	usleep_range(10000, 11000);
++
++	/*
++	 * The PHY has to come out of reset once before it will accept the
++	 * tuning writes, and again afterwards for them to take effect.
++	 */
++	rtl8197f_pcie_phy_reset(pcie);
++	usleep_range(10000, 11000);
++	rtl8197f_pcie_phy_setup(pcie);
++	usleep_range(10000, 11000);
++	rtl8197f_pcie_phy_reset(pcie);
++
++	/* PERST# low long enough to satisfy the endpoint's power-on timing. */
++	val = readl(pcie->sysreg + SYS_ENABLE);
++	writel(val & ~SYS_ENABLE_PERST, pcie->sysreg + SYS_ENABLE);
++	msleep(300);
++	writel(val | SYS_ENABLE_PERST, pcie->sysreg + SYS_ENABLE);
++
++	return rtl8197f_pcie_wait_link(pcie);
++}
++
++/* Point the PCIe source at its CPU interrupt line and unmask it. */
++static void rtl8197f_pcie_irq_route(struct rtl8197f_pcie *pcie)
++{
++	u32 val;
++
++	val = readl(pcie->sysreg + ICTL_IRR2);
++	val = (val & ~ICTL_IRR2_PCIE_MASK) | ICTL_IRR2_PCIE_IP;
++	writel(val, pcie->sysreg + ICTL_IRR2);
++
++	writel(readl(pcie->sysreg + ICTL_GIMR) | ICTL_GIMR_PCIE_IE,
++	       pcie->sysreg + ICTL_GIMR);
++}
++
++static void __iomem *rtl8197f_pcie_map(struct platform_device *pdev,
++				       unsigned int idx)
++{
++	struct resource *res;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, idx);
++	if (!res)
++		return NULL;
++
++	/*
++	 * Plain ioremap rather than devm_ioremap_resource(): the system
++	 * register window is shared with the ethernet driver, which maps it the
++	 * same way, so neither may claim it exclusively.
++	 */
++	return devm_ioremap(&pdev->dev, res->start, resource_size(res));
++}
++
++static int rtl8197f_pcie_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct pci_host_bridge *bridge;
++	struct rtl8197f_pcie *pcie;
++	int ret;
++
++	bridge = devm_pci_alloc_host_bridge(dev, sizeof(*pcie));
++	if (!bridge)
++		return -ENOMEM;
++
++	pcie = pci_host_bridge_priv(bridge);
++	pcie->dev = dev;
++
++	pcie->rc_cfg = rtl8197f_pcie_map(pdev, 0);
++	pcie->rc_ext = rtl8197f_pcie_map(pdev, 1);
++	pcie->ep_cfg = rtl8197f_pcie_map(pdev, 2);
++	pcie->sysreg = rtl8197f_pcie_map(pdev, 3);
++	if (!pcie->rc_cfg || !pcie->rc_ext || !pcie->ep_cfg || !pcie->sysreg)
++		return -ENOMEM;
++
++	ret = rtl8197f_pcie_hw_init(pcie);
++	if (ret)
++		return ret;
++
++	rtl8197f_pcie_irq_route(pcie);
++
++	bridge->sysdata = pcie;
++	bridge->ops = &rtl8197f_pcie_ops;
++
++	return pci_host_probe(bridge);
++}
++
++static const struct of_device_id rtl8197f_pcie_of_match[] = {
++	{ .compatible = "realtek,rtl8197f-pcie" },
++	{ },
++};
++
++static struct platform_driver rtl8197f_pcie_driver = {
++	.probe = rtl8197f_pcie_probe,
++	.driver = {
++		.name = "rtl8197f-pcie",
++		.of_match_table = rtl8197f_pcie_of_match,
++		.suppress_bind_attrs = true,
++	},
++};
++builtin_platform_driver(rtl8197f_pcie_driver);
+diff --git a/target/linux/rtl819x/image/Makefile b/target/linux/rtl819x/image/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..984042b4696d890e9ef31c01e208d0532f50b553
+--- /dev/null
++++ b/target/linux/rtl819x/image/Makefile
+@@ -0,0 +1,106 @@
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# RTL819x image recipes.
++
++include $(TOPDIR)/rules.mk
++include $(INCLUDE_DIR)/image.mk
++
++DTS_DIR := ../dts
++# The boot code copies the cr6b payload to 0x80a00000 and jumps there, so the
++# loader must be linked for that address. The kernel load base and entry are
++# read from the built ELF at image time (see Build/loader-kernel).
++LOADER_LOADADDR := 0x80a00000
++RAMSIZE := 0x04000000
++# The generic lzma-loader decompresses to KERNEL_ENTRY and jumps to KERNEL_ENTRY,
++# which assumes the kernel's entry symbol sits at its load base. On MIPS,
++# kernel_entry lives in .ref.text and the linker places it inside .text, so the
++# two differ (_text=0x80000000, kernel_entry=0x8066xxxx). Read both from the
++# built ELF and decompress to the load base while jumping to the real entry.
++define Build/loader-kernel
++	rm -rf $@.src
++	mkdir -p $@.src
++	$(CP) ../../generic/image/lzma-loader/src/* $@.src/
++	cp "$@" "$@.src/vmlinux.lzma"
++	$(SED) 's/unsigned char \*\*buffer/const unsigned char **buffer/' \
++		-e 's/unsigned char \*buffer;/const unsigned char *buffer;/' \
++		$@.src/decompress.c
++	$(SED) 's|(unsigned char\*)KERNEL_ENTRY|(unsigned char*)KERNEL_LOAD|' \
++		$@.src/decompress.c
++	# Progress markers so a stop after "Jump to image start" is diagnosable.
++	cp ./loader-dbg.h $@.src/loader-dbg.h
++	$(SED) 's|#include "LzmaDecode.h"|#include "LzmaDecode.h"\n#include "loader-dbg.h"|' \
++		$@.src/decompress.c
++	$(SED) 's|\tdata = lzma_start;|\tdbg_report_uart_divisor();\n\tdbg_dump_uart();\n\tdbg_puts("loader: decompressing kernel\\n");\n\tdata = lzma_start;|' \
++		$@.src/decompress.c
++	$(SED) 's|\t\tblast_dcache(dcache_size, dcache_lsize);|\t\tdbg_puts("loader: done, jumping to kernel\\n");\n\t\tblast_dcache(dcache_size, dcache_lsize);|' \
++		$@.src/decompress.c
++	# The boot code jumps to the first byte of the image, so _start must be at
++	# offset 0. The generic linker script puts *(.text.entry) first, and with
++	# -ffunction-sections that section holds decompress.c's entry() -- jumping
++	# there would skip start.S's cache setup and pass it garbage arguments. Park
++	# _start in its own section and place that section first instead.
++	$(SED) 's/^LEAF(_start)/.section .text.start,"ax",@progbits\nLEAF(_start)/' \
++		$@.src/start.S
++	$(SED) 's/*(.text.entry)/KEEP(*(.text.start))\n    *(.text.entry)/' \
++		$@.src/lzma.lds.in
++	set -e; \
++	kload=`python3 ./kernel-addrs.py --load $(KDIR)/vmlinux.elf`; \
++	kentry=`python3 ./kernel-addrs.py --entry $(KDIR)/vmlinux.elf`; \
++	echo "kernel load=$$kload entry=$$kentry loader=$(LOADER_LOADADDR)"; \
++	echo "CFLAGS += -DKERNEL_LOAD=$$kload" >> $@.src/Makefile; \
++	$(MAKE) -C $@.src \
++		CC="$(TARGET_CC) -EL" \
++		LD="$(TARGET_CROSS)ld -EL" \
++		OBJDUMP="$(TARGET_CROSS)objdump -EL" \
++		O_FORMAT=elf32-tradlittlemips \
++		CROSS_COMPILE="$(TARGET_CROSS)" \
++		LOADADDR=$(LOADER_LOADADDR) \
++		KERNEL_ENTRY=$$kentry \
++		RAMSIZE=$(RAMSIZE) \
++		all
++	mv "$@.src/lzma.bin" "$@"
++	rm -rf $@.src
++endef
++
++define Build/a2004m-factory
++	python3 ./a2004m-factory.py \
++		--input "$@" \
++		--output "$@.new" \
++		--report "$@.UNTESTED.txt"
++	mv "$@.new" "$@"
++	cp "$@.UNTESTED.txt" "$(BIN_DIR)/$(DEVICE_IMG_PREFIX)-factory_15_365.bin.UNTESTED.txt"
++endef
++
++define Build/a2004m-sysupgrade
++	python3 ./a2004m-factory.py \
++		--input "$@" \
++		--output "$@.factory" \
++		--report "$@.UNTESTED.txt"
++	dd if="$@.factory" of="$@.new" bs=65536 skip=4
++	rm -f "$@.factory" "$@.UNTESTED.txt"
++	mv "$@.new" "$@"
++endef
++
++define Device/Default
++  PROFILES := Default
++  KERNEL_DEPENDS = $$(wildcard $$(DTS_DIR)/$$(DEVICE_DTS).dts)
++endef
++
++define Device/iptime_a2004mu
++  DEVICE_VENDOR := ipTIME
++  DEVICE_MODEL := A2004MU
++  DEVICE_DTS := rtl8197f-a2004mu
++  IMAGE_SIZE := 7936k
++  KERNEL_SIZE := 2816k
++  KERNEL := kernel-bin | append-dtb | lzma | loader-kernel
++  DEVICE_PACKAGES := dnsmasq
++  IMAGES := sysupgrade.bin factory_15_365.bin
++  IMAGE/sysupgrade.bin := append-kernel | pad-to $$(KERNEL_SIZE) | \
++	append-rootfs | check-size | a2004m-sysupgrade | append-metadata
++  IMAGE/factory_15_365.bin := append-kernel | pad-to $$(KERNEL_SIZE) | \
++	append-rootfs | check-size | a2004m-factory
++  DEFAULT := n
++endef
++TARGET_DEVICES += iptime_a2004mu
++
++$(eval $(call BuildImage))
+diff --git a/target/linux/rtl819x/image/a2004m-factory.py b/target/linux/rtl819x/image/a2004m-factory.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d4d39d56b32e30f1b43986b14aa9a06341c9b29d
+--- /dev/null
++++ b/target/linux/rtl819x/image/a2004m-factory.py
+@@ -0,0 +1,431 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only
++"""Build an experimental ipTIME A2004M/A2004MU factory wrapper.
++
++This tool intentionally does not use stock firmware bytes. It only emits the
++observed ipTIME header fields and checksum arithmetic needed to wrap the
++OpenWrt-built loader/kernel/rootfs layout for offline validation.
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import struct
++from pathlib import Path
++
++
++FW_OFFSET = 0x40000
++HEADER_LEN = 0x38
++CR6B_OFFSET = FW_OFFSET + 0x48
++CR6B_HEADER_LEN = 0x10
++# The boot code copies the cr6b payload to cr6b.startAddr and jumps to it, so
++# the first byte after the 16-byte cr6b header is the first instruction the CPU
++# executes. The loader must start exactly here: any padding left in front of it
++# is executed as code (0xff fill decodes to a reserved instruction, which the
++# stock boot code reports as "Undefined Exception happen.").
++LOADER_OFFSET = CR6B_OFFSET + CR6B_HEADER_LEN
++ROOTFS_FILE_OFFSET = 0x300000
++# rtk-exec rootfs is realigned onto the flash "rootfs" partition base so the
++# SquashFS lands exactly on the eraseblock boundary the DTS/MTD map expects.
++TARGET_ROOTFS_FLASH_OFFSET = 0x300000
++DTS_ROOTFS_PARTITION_OFFSET = 0x300000
++ERASEBLOCK_SIZE = 0x10000
++IMAGE_SIZE = 0x7C0000
++FLASH_SIZE = 0x800000
++# rtkload-inplace: the stock-compatible in-place first stage occupies
++# LOADER_OFFSET..PAYLOAD_FILE_OFFSET and the kernel LZMA payload begins at the
++# stock file offset 0x42860 (== LOADER_OFFSET + 0x27e0).
++PAYLOAD_FILE_OFFSET = 0x42860
++LOADER_REGION_MAX = PAYLOAD_FILE_OFFSET - LOADER_OFFSET
++LZMA_PROPS_BYTES = (0x5D, 0x6D)
++INPUT_RAW = "raw"
++INPUT_CVIMG = "cvimg"
++INPUT_RTK_EXEC = "rtk-exec"
++INPUT_RTKLOAD_INPLACE = "rtkload-inplace"
++
++PROTECT2_MAGIC = 0x9A8F998B
++PROTECT2_SECRET = 0x128A8392
++PRODUCT = b"a2004m\x00\x00"
++VERSION = b"15.365\x00\x00"
++KERNEL_MARKER = b"kernel\x00\x00"
++SYSPARAM_MAGIC = b"BTMAGIN\x00"
++SYSPARAM_CONSTANTS_OFFSET = 0x1FC38
++SYSPARAM_CONSTANTS = bytes.fromhex(
++    "00089f00"
++    "ffff0000"
++    "ae195401"
++    "00000200"
++    "00000000"
++    "00000001"
++    "00000000"
++    "92838a12"
++    "c0a80001"
++)
++SYSPARAM_PROTECT_SEED_OFFSET = 0x1FC54
++
++
++def u32(value: int) -> int:
++    return value & 0xFFFFFFFF
++
++
++def u32le(data: bytes | bytearray, offset: int) -> int:
++    return int.from_bytes(data[offset : offset + 4], "little")
++
++
++def u64le(data: bytes | bytearray, offset: int) -> int:
++    return int.from_bytes(data[offset : offset + 8], "little")
++
++
++def u32be(data: bytes | bytearray, offset: int) -> int:
++    return int.from_bytes(data[offset : offset + 4], "big")
++
++
++def putle(data: bytearray, offset: int, value: int) -> None:
++    struct.pack_into("<I", data, offset, u32(value))
++
++
++def putbe(data: bytearray, offset: int, value: int) -> None:
++    struct.pack_into(">I", data, offset, u32(value))
++
++
++def protect_crc_candidate(base_sum: int, secret: int, model_raw: bytes) -> int:
++    model_len = len(model_raw.split(b"\x00", 1)[0])
++    return u32(u32(model_len * secret) + u32(~base_sum)) ^ base_sum
++
++
++def protect_crc2_candidate(base_sum: int, secret: int, model_raw: bytes) -> int:
++    model = model_raw.split(b"\x00", 1)[0]
++    model_len = len(model)
++    value = protect_crc_candidate(base_sum, secret, model_raw)
++    for byte in model:
++        value = u32(value + byte * model_len)
++    return value
++
++
++def sha256(data: bytes) -> str:
++    return hashlib.sha256(data).hexdigest()
++
++
++def align_up(value: int, alignment: int) -> int:
++    return (value + alignment - 1) & ~(alignment - 1)
++
++
++def split_input(input_data: bytes, input_format: str) -> tuple[bytes, bytes, int, int]:
++    hsqs = input_data.find(b"hsqs")
++    if hsqs < 0:
++        raise ValueError("input does not contain SquashFS magic")
++
++    if input_format == INPUT_RAW:
++        if hsqs != 0x2C0000:
++            raise ValueError(f"expected OpenWrt rootfs at 0x2c0000, got 0x{hsqs:x}")
++        rootfs_file_offset = ROOTFS_FILE_OFFSET
++        kernel_end = max(i for i, byte in enumerate(input_data[:hsqs]) if byte) + 1
++        kernel = input_data[:kernel_end]
++        rootfs = input_data[hsqs:]
++        return kernel, rootfs, rootfs_file_offset, kernel_end
++
++    if input_format == INPUT_CVIMG:
++        if input_data[:4] != b"cs6c":
++            raise ValueError("cvimg input does not start with cs6c")
++        rootfs_file_offset = LOADER_OFFSET + hsqs
++        return input_data[:hsqs], input_data[hsqs:], rootfs_file_offset, hsqs
++
++    if input_format == INPUT_RTK_EXEC:
++        if input_data[:4] == b"cs6c":
++            raise ValueError("rtk-exec input must not start with nested cs6c")
++        # The rtk loader/kernel body is placed at LOADER_OFFSET; the rootfs is
++        # realigned to the flash "rootfs" partition base (padding the gap with
++        # 0xff) so hsqs lands on the eraseblock boundary instead of directly
++        # abutting the kernel body.
++        rootfs_file_offset = TARGET_ROOTFS_FLASH_OFFSET
++        return input_data[:hsqs], input_data[hsqs:], rootfs_file_offset, hsqs
++
++    if input_format == INPUT_RTKLOAD_INPLACE:
++        if input_data[:4] == b"cs6c":
++            raise ValueError("rtkload-inplace input must not start with nested cs6c")
++        # input = [in-place loader padded to 0x27e0][kernel.lzma][rootfs].
++        # The loader+payload body is placed at LOADER_OFFSET so the kernel
++        # LZMA starts at the stock file offset 0x42860; the rootfs is realigned
++        # to the flash "rootfs" partition base.
++        rootfs_file_offset = TARGET_ROOTFS_FLASH_OFFSET
++        return input_data[:hsqs], input_data[hsqs:], rootfs_file_offset, hsqs
++
++    raise ValueError(f"unsupported input format: {input_format}")
++
++
++def build_image(input_data: bytes, input_format: str) -> tuple[bytes, list[tuple[str, bool, str]]]:
++    kernel, rootfs, rootfs_file_offset, kernel_end = split_input(input_data, input_format)
++
++    output_size = IMAGE_SIZE
++    rootfs_end = rootfs_file_offset + len(rootfs)
++    if rootfs_end > FLASH_SIZE:
++        raise ValueError(f"factory wrapper exceeds 8MB flash: 0x{rootfs_end:x}")
++    if rootfs_end - FW_OFFSET > IMAGE_SIZE:
++        raise ValueError(f"factory payload exceeds image size: 0x{rootfs_end - FW_OFFSET:x}")
++    if LOADER_OFFSET + len(kernel) > rootfs_file_offset:
++        raise ValueError(
++            "loader-wrapped kernel overlaps rootfs: "
++            f"end=0x{LOADER_OFFSET + len(kernel):x} rootfs=0x{rootfs_file_offset:x}"
++        )
++    if rootfs[:4] != b"hsqs" or len(rootfs) < 0x30:
++        raise ValueError("rootfs does not contain a complete SquashFS superblock")
++    squashfs_bytes_used = u64le(rootfs, 0x28)
++    if squashfs_bytes_used > len(rootfs):
++        raise ValueError(
++            "SquashFS bytes_used exceeds rootfs input: "
++            f"0x{squashfs_bytes_used:x} > 0x{len(rootfs):x}"
++        )
++    immutable_end = align_up(
++        rootfs_file_offset + squashfs_bytes_used, ERASEBLOCK_SIZE
++    )
++    if immutable_end > output_size:
++        raise ValueError(
++            f"immutable payload exceeds image size: 0x{immutable_end:x}"
++        )
++
++    # The stock web UI compares the complete upload size against the 0x7c0000
++    # firmware-partition limit before firmware.cgi runs. Keep the 0x40000-byte
++    # stock prefix in that limit and pad the writable remainder with 0xff.
++    image = bytearray(b"\xff" * output_size)
++    image[0x1FC00 : 0x1FC08] = SYSPARAM_MAGIC
++    image[0x1FC08 : 0x1FC10] = PRODUCT
++    image[0x1FC28 : 0x1FC30] = b"1.0\x00\x00\x00\x00\x00"
++    image[
++        SYSPARAM_CONSTANTS_OFFSET : SYSPARAM_CONSTANTS_OFFSET + len(SYSPARAM_CONSTANTS)
++    ] = SYSPARAM_CONSTANTS
++
++    image[FW_OFFSET : FW_OFFSET + 8] = PRODUCT
++    image[FW_OFFSET + 8 : FW_OFFSET + 16] = VERSION
++    putle(image, FW_OFFSET + 0x10, PROTECT2_MAGIC)
++    putle(image, FW_OFFSET + 0x14, 0)
++    putle(image, FW_OFFSET + 0x2C, rootfs_file_offset)
++    putle(image, FW_OFFSET + 0x30, immutable_end - (FW_OFFSET + HEADER_LEN))
++    putle(image, FW_OFFSET + 0x34, 0)
++    image[FW_OFFSET + 0x38 : FW_OFFSET + 0x40] = KERNEL_MARKER
++    image[FW_OFFSET + 0x48 : FW_OFFSET + 0x4C] = b"cr6b"
++    putbe(image, FW_OFFSET + 0x4C, 0x80A00000)
++    putbe(image, FW_OFFSET + 0x50, FW_OFFSET)
++
++    image[LOADER_OFFSET : LOADER_OFFSET + len(kernel)] = kernel
++    image[rootfs_file_offset:rootfs_end] = rootfs
++
++    cr6b_offset = CR6B_OFFSET
++    descriptor_len = LOADER_OFFSET + len(kernel) - cr6b_offset
++    putle(image, FW_OFFSET + 0x40, descriptor_len)
++    putbe(image, FW_OFFSET + 0x54, descriptor_len - 0x10)
++    kernel_sum = sum(image[cr6b_offset : cr6b_offset + descriptor_len]) & 0xFFFFFFFF
++    putle(image, FW_OFFSET + 0x44, kernel_sum)
++
++    payload_start = FW_OFFSET + HEADER_LEN
++    payload_end = immutable_end
++    byte_sum = sum(image[payload_start:payload_end]) & 0xFFFFFFFF
++    primary = protect_crc_candidate(byte_sum, PROTECT2_SECRET, image[FW_OFFSET : FW_OFFSET + 8])
++    protect2 = protect_crc2_candidate(primary, PROTECT2_SECRET, image[FW_OFFSET : FW_OFFSET + 8])
++    putle(image, FW_OFFSET + 0x34, primary)
++    putle(image, FW_OFFSET + 0x14, protect2)
++
++    checks = self_check(image, input_data, kernel_end, input_format, rootfs_file_offset)
++    return bytes(image), checks
++
++
++def self_check(
++    image: bytearray,
++    input_data: bytes,
++    kernel_end: int,
++    input_format: str,
++    rootfs_file_offset: int,
++) -> list[tuple[str, bool, str]]:
++    checks: list[tuple[str, bool, str]] = []
++
++    def add(name: str, ok: bool, detail: str = "") -> None:
++        checks.append((name, ok, detail))
++
++    check_len = u32le(image, FW_OFFSET + 0x30)
++    payload_start = FW_OFFSET + HEADER_LEN
++    payload_end = payload_start + check_len
++    squashfs_bytes_used = u64le(image, rootfs_file_offset + 0x28)
++    immutable_end = align_up(
++        rootfs_file_offset + squashfs_bytes_used, ERASEBLOCK_SIZE
++    )
++    descriptor_len = u32le(image, FW_OFFSET + 0x40)
++    cr6b_offset = FW_OFFSET + 0x48
++    kernel_sum = sum(image[cr6b_offset : cr6b_offset + descriptor_len]) & 0xFFFFFFFF
++    byte_sum = sum(image[payload_start:payload_end]) & 0xFFFFFFFF
++    primary = protect_crc_candidate(byte_sum, PROTECT2_SECRET, image[FW_OFFSET : FW_OFFSET + 8])
++    protect2 = protect_crc2_candidate(primary, PROTECT2_SECRET, image[FW_OFFSET : FW_OFFSET + 8])
++
++    add("sysparam_magic", image[0x1FC00 : 0x1FC08] == SYSPARAM_MAGIC)
++    add("sysparam_product", image[0x1FC08 : 0x1FC10] == PRODUCT)
++    add(
++        "sysparam_constants",
++        image[
++            SYSPARAM_CONSTANTS_OFFSET : SYSPARAM_CONSTANTS_OFFSET + len(SYSPARAM_CONSTANTS)
++        ]
++        == SYSPARAM_CONSTANTS,
++    )
++    add(
++        "sysparam_protect_seed",
++        u32le(image, SYSPARAM_PROTECT_SEED_OFFSET) == PROTECT2_SECRET,
++        f"0x{u32le(image, SYSPARAM_PROTECT_SEED_OFFSET):08x}",
++    )
++    add("product", image[FW_OFFSET : FW_OFFSET + 8] == PRODUCT)
++    add("protect2_magic", u32le(image, FW_OFFSET + 0x10) == PROTECT2_MAGIC)
++    add(
++        "input_format",
++        input_format in (INPUT_RAW, INPUT_CVIMG, INPUT_RTK_EXEC, INPUT_RTKLOAD_INPLACE),
++        input_format,
++    )
++    add("rootfs_field", u32le(image, FW_OFFSET + 0x2C) == rootfs_file_offset)
++    add(
++        "checksum_boundary",
++        payload_end == immutable_end,
++        f"checksum_end=0x{payload_end:x} immutable_end=0x{immutable_end:x}",
++    )
++    add(
++        "writable_overlay_excluded",
++        payload_end < len(image),
++        f"checksum_end=0x{payload_end:x} image_end=0x{len(image):x}",
++    )
++    add("kernel_marker", image[FW_OFFSET + 0x38 : FW_OFFSET + 0x40] == KERNEL_MARKER)
++    add("cr6b", image[FW_OFFSET + 0x48 : FW_OFFSET + 0x4C] == b"cr6b")
++    add("loader_start", image[LOADER_OFFSET : LOADER_OFFSET + 16] == input_data[:16])
++
++    # Entry contract: the CPU begins executing at the first byte of the cr6b
++    # payload, so the loader must sit there with no padding in front of it.
++    entry_offset = CR6B_OFFSET + CR6B_HEADER_LEN
++    add(
++        "loader_at_cr6b_payload",
++        LOADER_OFFSET == entry_offset,
++        f"loader=0x{LOADER_OFFSET:x} entry=0x{entry_offset:x}",
++    )
++    add(
++        "entry_is_not_fill",
++        image[entry_offset : entry_offset + 4] not in (b"\xff\xff\xff\xff", b"\x00\x00\x00\x00"),
++        f"first_word={image[entry_offset:entry_offset + 4].hex()}",
++    )
++    add(
++        "cr6b_payload_covers_loader",
++        u32be(image, FW_OFFSET + 0x54) == kernel_end,
++        f"cr6b_len=0x{u32be(image, FW_OFFSET + 0x54):x} loader_len=0x{kernel_end:x}",
++    )
++    if input_format == INPUT_CVIMG:
++        add("cvimg_header", image[LOADER_OFFSET : LOADER_OFFSET + 4] == b"cs6c")
++    if input_format == INPUT_RTK_EXEC:
++        add("no_nested_cvimg", image[LOADER_OFFSET : LOADER_OFFSET + 4] != b"cs6c")
++        add("rtk_exec_head", image[LOADER_OFFSET : LOADER_OFFSET + 16] == input_data[:16])
++    if input_format == INPUT_RTKLOAD_INPLACE:
++        add("no_nested_cvimg", image[LOADER_OFFSET : LOADER_OFFSET + 4] != b"cs6c")
++        add("inplace_head", image[LOADER_OFFSET : LOADER_OFFSET + 16] == input_data[:16])
++        props = image[PAYLOAD_FILE_OFFSET] if len(image) > PAYLOAD_FILE_OFFSET else -1
++        add(
++            "lzma_props_at_payload",
++            props in LZMA_PROPS_BYTES,
++            f"0x{props & 0xFF:02x}@0x{PAYLOAD_FILE_OFFSET:x}",
++        )
++        add(
++            "decompressing_string",
++            b"decompressing kernel:" in bytes(image[LOADER_OFFSET:PAYLOAD_FILE_OFFSET]),
++        )
++        add(
++            "loader_region_fits",
++            LOADER_OFFSET + kernel_end >= PAYLOAD_FILE_OFFSET
++            and (kernel_end - LOADER_REGION_MAX) >= 0,
++            f"loader<=0x{LOADER_REGION_MAX:x} payload@0x{PAYLOAD_FILE_OFFSET:x}",
++        )
++    add("kernel_checksum", u32le(image, FW_OFFSET + 0x44) == kernel_sum, f"0x{kernel_sum:08x}")
++    add("total_checksum", u32le(image, FW_OFFSET + 0x34) == primary, f"0x{primary:08x}")
++    add("protect2_checksum", u32le(image, FW_OFFSET + 0x14) == protect2, f"0x{protect2:08x}")
++    add("hsqs_offset", image.find(b"hsqs") == rootfs_file_offset, f"0x{image.find(b'hsqs'):x}")
++    add("kernel_rootfs_gap", LOADER_OFFSET + kernel_end <= rootfs_file_offset)
++    add(
++        "rootfs_eraseblock_aligned",
++        rootfs_file_offset % ERASEBLOCK_SIZE == 0,
++        f"0x{rootfs_file_offset:x} % 0x{ERASEBLOCK_SIZE:x}",
++    )
++    add(
++        "dts_rootfs_match",
++        rootfs_file_offset == DTS_ROOTFS_PARTITION_OFFSET,
++        f"dts=0x{DTS_ROOTFS_PARTITION_OFFSET:x}",
++    )
++    add("image_size", len(image) - FW_OFFSET <= IMAGE_SIZE, f"0x{len(image) - FW_OFFSET:x}")
++    add("web_upload_size", len(image) <= IMAGE_SIZE, f"0x{len(image):x} <= 0x{IMAGE_SIZE:x}")
++    add("flash_size", len(image) <= FLASH_SIZE, f"0x{len(image):x}")
++    add(
++        "writable_flash_range",
++        FW_OFFSET <= rootfs_file_offset and len(image) <= FLASH_SIZE,
++        f"body=0x{FW_OFFSET:x}..0x{len(image):x} writable=0x{FW_OFFSET:x}..0x{FLASH_SIZE:x}",
++    )
++    return checks
++
++
++def write_report(path: Path, output: bytes, checks: list[tuple[str, bool, str]]) -> None:
++    lines = [
++        "UNTESTED A2004MU factory wrapper self-check",
++        "This is not confirmed flashable and is not a web-admin upload recommendation.",
++        f"file_size=0x{len(output):x} ({len(output)})",
++        f"sha256={sha256(output)}",
++        f"product={output[FW_OFFSET:FW_OFFSET + 8]!r}",
++        f"protect2=0x{u32le(output, FW_OFFSET + 0x10):08x}",
++        f"rootfs_field=0x{u32le(output, FW_OFFSET + 0x2C):x}",
++        "rootfs_coordinates:",
++        f"  factory_file_offset=0x{output.find(b'hsqs'):x}",
++        f"  flash_offset=0x{output.find(b'hsqs'):x}",
++        f"  image_fw_relative_offset=0x{output.find(b'hsqs') - FW_OFFSET:x}",
++        f"  image_body_relative_offset=0x{output.find(b'hsqs') - (FW_OFFSET + HEADER_LEN):x}",
++        f"  header_rootfs_field=0x{u32le(output, FW_OFFSET + 0x2C):x} (flash-absolute file offset)",
++        f"  dts_rootfs_partition_offset=0x{DTS_ROOTFS_PARTITION_OFFSET:x}",
++        f"check_len=0x{u32le(output, FW_OFFSET + 0x30):x}",
++        f"checksum_end=0x{FW_OFFSET + HEADER_LEN + u32le(output, FW_OFFSET + 0x30):x}",
++        f"total_checksum=0x{u32le(output, FW_OFFSET + 0x34):08x}",
++        f"kernel_len=0x{u32le(output, FW_OFFSET + 0x40):x}",
++        f"kernel_checksum=0x{u32le(output, FW_OFFSET + 0x44):08x}",
++        f"load=0x{u32be(output, FW_OFFSET + 0x4C):08x}",
++        f"flash_offset=0x{u32be(output, FW_OFFSET + 0x50):08x}",
++        f"cr6b_size=0x{u32be(output, FW_OFFSET + 0x54):x}",
++        f"hsqs_offset=0x{output.find(b'hsqs'):x}",
++        f"lzma_props_at_0x42860=0x{(output[PAYLOAD_FILE_OFFSET] if len(output) > PAYLOAD_FILE_OFFSET else 0):02x}",
++        f"decompressing_string_at=0x{output.find(b'decompressing kernel:'):x}",
++        f"cvimg_header_offset=0x{output.find(b'cs6c'):x}",
++        f"nop_sled_0x40060_0x4007f={output[FW_OFFSET + 0x60:FW_OFFSET + 0x80].hex(' ')}",
++        f"loader_area_first_16={output[LOADER_OFFSET:LOADER_OFFSET + 16].hex(' ')}",
++        "checks:",
++    ]
++    for name, ok, detail in checks:
++        lines.append(f"  {name}: {'PASS' if ok else 'FAIL'} {detail}")
++    lines.append(
++        "overall: "
++        + ("PASS" if all(ok for _, ok, _ in checks) else "FAIL")
++        + " (offline arithmetic only)"
++    )
++    path.write_text("\n".join(lines) + "\n")
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--input", required=True, type=Path)
++    parser.add_argument("--output", required=True, type=Path)
++    parser.add_argument("--report", required=True, type=Path)
++    parser.add_argument(
++        "--input-format",
++        choices=(INPUT_RAW, INPUT_CVIMG, INPUT_RTK_EXEC, INPUT_RTKLOAD_INPLACE),
++        default=INPUT_RAW,
++    )
++    args = parser.parse_args()
++
++    input_data = args.input.read_bytes()
++    output, checks = build_image(input_data, args.input_format)
++    if not all(ok for _, ok, _ in checks):
++        write_report(args.report, output, checks)
++        for name, ok, detail in checks:
++            if not ok:
++                print(f"self-check failed: {name} {detail}")
++        return 1
++
++    args.output.write_bytes(output)
++    write_report(args.report, output, checks)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/target/linux/rtl819x/image/kernel-addrs.py b/target/linux/rtl819x/image/kernel-addrs.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a83653ac22e4b4f858e804bf53c3b65ebce328df
+--- /dev/null
++++ b/target/linux/rtl819x/image/kernel-addrs.py
+@@ -0,0 +1,66 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only
++"""Print the kernel's load base or entry point from a vmlinux ELF.
++
++The generic lzma-loader uses a single KERNEL_ENTRY as both the decompression
++destination and the jump target. That only works when the kernel's entry symbol
++sits at its load base. On MIPS, kernel_entry lives in .ref.text and the linker
++places it well inside .text, so the two addresses differ and must be read from
++the ELF rather than hardcoded (they move on every kernel rebuild).
++"""
++
++from __future__ import annotations
++
++import argparse
++import struct
++import sys
++from pathlib import Path
++
++
++PT_LOAD = 1
++
++
++def read_elf(path: Path) -> tuple[int, int]:
++    data = path.read_bytes()
++    if data[:4] != b"\x7fELF":
++        raise ValueError(f"{path} is not an ELF file")
++    if data[4] != 1:
++        raise ValueError("only 32-bit ELF is supported")
++    endian = "<" if data[5] == 1 else ">"
++
++    entry = struct.unpack_from(endian + "I", data, 0x18)[0]
++    phoff = struct.unpack_from(endian + "I", data, 0x1C)[0]
++    phentsize = struct.unpack_from(endian + "H", data, 0x2A)[0]
++    phnum = struct.unpack_from(endian + "H", data, 0x2C)[0]
++
++    load_base = None
++    for i in range(phnum):
++        off = phoff + i * phentsize
++        p_type, _, p_vaddr = struct.unpack_from(endian + "3I", data, off)
++        if p_type == PT_LOAD:
++            load_base = p_vaddr if load_base is None else min(load_base, p_vaddr)
++
++    if load_base is None:
++        raise ValueError(f"{path} has no PT_LOAD segment")
++    return load_base, entry
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("vmlinux", type=Path)
++    group = parser.add_mutually_exclusive_group(required=True)
++    group.add_argument("--load", action="store_true", help="lowest PT_LOAD vaddr")
++    group.add_argument("--entry", action="store_true", help="ELF entry point")
++    args = parser.parse_args()
++
++    load_base, entry = read_elf(args.vmlinux)
++    print(f"0x{load_base if args.load else entry:08x}")
++    return 0
++
++
++if __name__ == "__main__":
++    try:
++        sys.exit(main())
++    except (OSError, ValueError) as exc:
++        print(f"kernel-addrs: {exc}", file=sys.stderr)
++        sys.exit(1)
+diff --git a/target/linux/rtl819x/image/loader-dbg.h b/target/linux/rtl819x/image/loader-dbg.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..90fdf3b05c6154f8759a30dc75e250c6c294c90d
+--- /dev/null
++++ b/target/linux/rtl819x/image/loader-dbg.h
+@@ -0,0 +1,126 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ *
++ * Minimal UART progress output for the A2004MU first-stage loader.
++ *
++ * The generic lzma-loader is silent, so a boot that stops after the bootloader's
++ * "Jump to image start=0x80a00000..." line gives no way to tell a slow
++ * decompression apart from a hang. These milestones mirror the stock loader's
++ * "decompressing kernel:" / "done" markers.
++ *
++ * Register layout was recovered from the stock first-stage loader's own putc
++ * (disassembled from the stock image, RAM 0x80a00e40..0x80a00e80):
++ *
++ *     lui  a1, 0xb814 ; ori a1, a1, 0x7014     ; a1 = LSR  = 0xb8147014
++ *   1:lbu  a2, 0(a1)  ; andi a2, a2, 0x20      ; THRE bit  = 0x20
++ *     beq  a2, zero, 1b                        ; wait for THRE
++ *     lui  v0, 0xb814 ; ori v0, v0, 0x7024     ; v0 = THR  = 0xb8147024
++ *     sb   a0, 0(v0)                           ; write char
++ *
++ * Note THR is at base+0x24, NOT the standard 16550 base+0x00. The bootloader
++ * has already configured the UART, so this only polls THRE and writes THR --
++ * no re-init, no clock maths. Accesses are byte-wide to match the stock loader.
++ */
++#ifndef A2004MU_LOADER_DBG_H
++#define A2004MU_LOADER_DBG_H
++
++#define DBG_UART_LSR (*(volatile unsigned char *)0xb8147014u)
++#define DBG_UART_THR (*(volatile unsigned char *)0xb8147024u)
++#define DBG_UART_LSR_THRE 0x20u
++
++static inline void dbg_putc(char c)
++{
++	while ((DBG_UART_LSR & DBG_UART_LSR_THRE) == 0)
++		;
++	DBG_UART_THR = (unsigned char)c;
++}
++
++static inline void dbg_puts(const char *s)
++{
++	while (*s) {
++		if (*s == '\n')
++			dbg_putc('\r');
++		dbg_putc(*s++);
++	}
++}
++
++static inline void dbg_puthex(unsigned int v)
++{
++	static const char hex[] = "0123456789abcdef";
++	int i;
++
++	dbg_putc('0');
++	dbg_putc('x');
++	for (i = 28; i >= 0; i -= 4)
++		dbg_putc(hex[(v >> i) & 0xf]);
++}
++
++/*
++ * Report the divisor the bootloader already programmed for a clean 38400 baud.
++ * uart_clock = divisor * 16 * 38400. LCR is saved and restored around the DLAB
++ * toggle so subsequent prints stay clean.
++ */
++static inline void dbg_report_uart_divisor(void)
++{
++	volatile unsigned char *lcr = (volatile unsigned char *)0xb814700cu;
++	volatile unsigned char *dll = (volatile unsigned char *)0xb8147000u;
++	volatile unsigned char *dlm = (volatile unsigned char *)0xb8147004u;
++	unsigned char saved = *lcr;
++	unsigned int lo, hi;
++
++	*lcr = saved | 0x80;
++	lo = *dll;
++	hi = *dlm;
++	*lcr = saved;
++
++	dbg_puts("loader: uart divisor=");
++	dbg_puthex((hi << 8) | lo);
++	dbg_puts(" (clk = divisor*614400)\n");
++}
++
++/*
++ * Dump the UART register block at both DLAB states. The stock loader transmits
++ * via offset 0x24, not the standard 16550 0x00, so the map is non-standard and
++ * needs to be seen directly. All registers are captured first, then DLAB is
++ * restored to 0, then the captured values are printed -- so the prints (which
++ * go through TX at 0x24) are never disturbed by the DLAB toggle.
++ */
++static inline void dbg_dump_uart(void)
++{
++	volatile unsigned char *base = (volatile unsigned char *)0xb8147000u;
++	unsigned char saved = base[0x0c];
++	unsigned char d0[11], d1[11];
++	int i;
++	static const unsigned char off[11] = {
++		0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x28
++	};
++
++	base[0x0c] = saved & ~0x80u;		/* DLAB = 0 */
++	for (i = 0; i < 11; i++)
++		d0[i] = base[off[i]];
++	base[0x0c] = saved | 0x80u;		/* DLAB = 1 */
++	for (i = 0; i < 11; i++)
++		d1[i] = base[off[i]];
++	base[0x0c] = saved;			/* restore */
++
++	dbg_puts("loader: uart regs dlab0:");
++	for (i = 0; i < 11; i++) {
++		dbg_putc(' ');
++		dbg_putc("0123456789abcdef"[(off[i] >> 4) & 0xf]);
++		dbg_putc("0123456789abcdef"[off[i] & 0xf]);
++		dbg_putc('=');
++		dbg_putc("0123456789abcdef"[(d0[i] >> 4) & 0xf]);
++		dbg_putc("0123456789abcdef"[d0[i] & 0xf]);
++	}
++	dbg_puts("\nloader: uart regs dlab1:");
++	for (i = 0; i < 11; i++) {
++		dbg_putc(' ');
++		dbg_putc("0123456789abcdef"[(off[i] >> 4) & 0xf]);
++		dbg_putc("0123456789abcdef"[off[i] & 0xf]);
++		dbg_putc('=');
++		dbg_putc("0123456789abcdef"[(d1[i] >> 4) & 0xf]);
++		dbg_putc("0123456789abcdef"[d1[i] & 0xf]);
++	}
++	dbg_putc('\n');
++}
++
++#endif /* A2004MU_LOADER_DBG_H */
+diff --git a/target/linux/rtl819x/patches-6.18/010-mips-add-realtek-rtl819x-platform-scaffold.patch b/target/linux/rtl819x/patches-6.18/010-mips-add-realtek-rtl819x-platform-scaffold.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..099343b0817d2b45c16b7ec4ec565b8faf179d23
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/010-mips-add-realtek-rtl819x-platform-scaffold.patch
+@@ -0,0 +1,64 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: OpenWrt RTL8197F scaffold <noreply@example.invalid>
++Date: Tue, 7 Jul 2026 00:00:00 +0900
++Subject: [PATCH] mips: add Realtek RTL819x platform scaffold
++
++Add a minimal RTL819x-class platform Kconfig hook for RTL8197F Stage 0
++bring-up. This does not claim compatibility with the existing RTL83xx/RTL93xx
++Realtek switch SoC platform.
++
++---
++ arch/mips/Kbuild.platforms | 1 +
++ arch/mips/Kconfig          | 18 ++++++++++++++++++
++ arch/mips/rtl819x/Platform | 8 ++++++++
++ 3 files changed, 27 insertions(+)
++ create mode 100644 arch/mips/rtl819x/Platform
++
++--- a/arch/mips/Kbuild.platforms
+++++ b/arch/mips/Kbuild.platforms
++@@ -24,6 +24,7 @@ platform-$(CONFIG_MACH_NINTENDO64)	+= n64/
++ platform-$(CONFIG_PIC32MZDA)		+= pic32/
++ platform-$(CONFIG_RALINK)		+= ralink/
++ platform-$(CONFIG_MIKROTIK_RB532)	+= rb532/
+++platform-$(CONFIG_MACH_REALTEK_RTL819X)	+= rtl819x/
++ platform-$(CONFIG_SGI_IP22)		+= sgi-ip22/
++ platform-$(CONFIG_SGI_IP27)		+= sgi-ip27/
++ platform-$(CONFIG_SGI_IP28)		+= sgi-ip22/
++--- a/arch/mips/Kconfig
+++++ b/arch/mips/Kconfig
++@@ -695,6 +695,24 @@ config MACH_REALTEK_RTL
++ 	select ARCH_HAS_RESET_CONTROLLER
++ 	select RESET_CONTROLLER
++
+++config MACH_REALTEK_RTL819X
+++	bool "Realtek RTL819x-class router SoCs"
+++	select BOOT_RAW
+++	select CEVT_R4K
+++	select COMMON_CLK
+++	select CSRC_R4K
+++	select DMA_NONCOHERENT
+++	select HAVE_PCI
+++	select IRQ_MIPS_CPU
+++	select PCI_DRIVERS_GENERIC
+++	select SYS_HAS_CPU_MIPS32_R2
+++	select SYS_SUPPORTS_32BIT_KERNEL
+++	select SYS_SUPPORTS_LITTLE_ENDIAN
+++	select USE_OF
+++	select SYS_HAS_EARLY_PRINTK
+++	help
+++	  Provisional platform hook for RTL8197F-class router SoC bring-up.
+++
++ config SGI_IP22
++ 	bool "SGI IP22 (Indy/Indigo2)"
++ 	select ARC_MEMORY
++--- /dev/null
+++++ b/arch/mips/rtl819x/Platform
++@@ -0,0 +1,8 @@
+++# SPDX-License-Identifier: GPL-2.0
+++# Provisional RTL819x-class platform hook.
+++# Legacy RTL8197F rtkmipsel references use 0x80000000 as the decompressed
+++# kernel LOADADDR. This is a compile-time scaffold link address only; it does
+++# not assert an A2004MU factory image, loader, or bootloader jump contract.
+++#
+++load-$(CONFIG_MACH_REALTEK_RTL819X) += 0x80000000
+++
+diff --git a/target/linux/rtl819x/patches-6.18/020-irqchip-add-realtek-rtl8197f-ictl-scaffold.patch b/target/linux/rtl819x/patches-6.18/020-irqchip-add-realtek-rtl8197f-ictl-scaffold.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..04666ccfe366fa0d2b6d88b3c073d4a0a1d8666a
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/020-irqchip-add-realtek-rtl8197f-ictl-scaffold.patch
+@@ -0,0 +1,211 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: OpenWrt RTL8197F scaffold <noreply@example.invalid>
++Date: Tue, 7 Jul 2026 00:00:00 +0900
++Subject: [PATCH] irqchip: add Realtek RTL8197F ICTL scaffold
++
++Add a minimal irqchip driver scaffold for the RTL8197F interrupt controller.
++Routing constants are intentionally left as TODOs until the kernel 6.x binding
++is finalized.
++
++---
++ drivers/irqchip/Kconfig                |   6 +
++ drivers/irqchip/Makefile               |   1 +
++ drivers/irqchip/irq-realtek-rtl8197f.c | 166 +++++++++++++++++++++++++
++ 3 files changed, 173 insertions(+)
++ create mode 100644 drivers/irqchip/irq-realtek-rtl8197f.c
++
++--- a/drivers/irqchip/Kconfig
+++++ b/drivers/irqchip/Kconfig
++@@ -230,6 +230,12 @@ config IRQ_MIPS_CPU
++ 	select GENERIC_IRQ_CHIP
++ 	select IRQ_DOMAIN
++
+++config IRQ_REALTEK_RTL8197F
+++	bool "Realtek RTL8197F interrupt controller scaffold"
+++	depends on MACH_REALTEK_RTL819X
+++	select IRQ_DOMAIN
+++	select GENERIC_IRQ_CHIP
+++
++ config CLPS711X_IRQCHIP
++ 	bool
++ 	select IRQ_DOMAIN
++--- a/drivers/irqchip/Makefile
+++++ b/drivers/irqchip/Makefile
++@@ -53,6 +53,7 @@ obj-$(CONFIG_IMGPDC_IRQ)		+= irq-imgpdc.o
++ obj-$(CONFIG_IRQ_MIPS_CPU)		+= irq-mips-cpu.o
++ obj-$(CONFIG_IXP4XX_IRQ)		+= irq-ixp4xx.o
++ obj-$(CONFIG_JCORE_AIC)			+= irq-jcore-aic.o
+++obj-$(CONFIG_IRQ_REALTEK_RTL8197F)	+= irq-realtek-rtl8197f.o
++ obj-$(CONFIG_RDA_INTC)			+= irq-rda-intc.o
++ obj-$(CONFIG_RENESAS_INTC_IRQPIN)	+= irq-renesas-intc-irqpin.o
++ obj-$(CONFIG_RENESAS_IRQC)		+= irq-renesas-irqc.o
++--- /dev/null
+++++ b/drivers/irqchip/irq-realtek-rtl8197f.c
++@@ -0,0 +1,167 @@
+++// SPDX-License-Identifier: GPL-2.0-only
+++/*
+++ * Realtek RTL8197F interrupt controller scaffold.
+++ *
+++ * Physical register base is 0x18003000. Legacy SDK sources often refer to the
+++ * same block through KSEG1 virtual addresses such as 0xb8003000; DT must use
+++ * the physical address.
+++ */
+++
+++#include <linux/bitops.h>
+++#include <linux/io.h>
+++#include <linux/irq.h>
+++#include <linux/irqchip.h>
+++#include <linux/irqchip/chained_irq.h>
+++#include <linux/irqdomain.h>
+++#include <linux/of_address.h>
+++#include <linux/of_irq.h>
+++#include <linux/spinlock.h>
+++
+++#define RTL8197F_ICTL_LINES	64
+++
+++#define RTL8197F_GIMR		0x00
+++#define RTL8197F_GISR		0x04
+++#define RTL8197F_IRR0		0x08
+++#define RTL8197F_IRR1		0x0c
+++#define RTL8197F_IRR2		0x10
+++#define RTL8197F_IRR3		0x14
+++#define RTL8197F_GIMR2		0x20
+++#define RTL8197F_GISR2		0x24
+++#define RTL8197F_IRR4		0x28
+++#define RTL8197F_IRR5		0x2c
+++#define RTL8197F_IRR6		0x30
+++#define RTL8197F_IRR7		0x34
+++
+++struct rtl8197f_ictl {
+++	void __iomem *base;
+++	struct irq_domain *domain;
+++	raw_spinlock_t lock;
+++};
+++
+++static void rtl8197f_ictl_mask(struct irq_data *d)
+++{
+++	struct rtl8197f_ictl *ictl = irq_data_get_irq_chip_data(d);
+++	unsigned long flags;
+++	u32 bit = d->hwirq & 31;
+++	u32 reg = d->hwirq < 32 ? RTL8197F_GIMR : RTL8197F_GIMR2;
+++	u32 val;
+++
+++	raw_spin_lock_irqsave(&ictl->lock, flags);
+++	val = readl(ictl->base + reg);
+++	val &= ~BIT(bit);
+++	writel(val, ictl->base + reg);
+++	raw_spin_unlock_irqrestore(&ictl->lock, flags);
+++}
+++
+++static void rtl8197f_ictl_unmask(struct irq_data *d)
+++{
+++	struct rtl8197f_ictl *ictl = irq_data_get_irq_chip_data(d);
+++	unsigned long flags;
+++	u32 bit = d->hwirq & 31;
+++	u32 reg = d->hwirq < 32 ? RTL8197F_GIMR : RTL8197F_GIMR2;
+++	u32 val;
+++
+++	raw_spin_lock_irqsave(&ictl->lock, flags);
+++	val = readl(ictl->base + reg);
+++	val |= BIT(bit);
+++	writel(val, ictl->base + reg);
+++	raw_spin_unlock_irqrestore(&ictl->lock, flags);
+++}
+++
+++static struct irq_chip rtl8197f_ictl_chip = {
+++	.name = "RTL8197F-ICTL",
+++	.irq_mask = rtl8197f_ictl_mask,
+++	.irq_unmask = rtl8197f_ictl_unmask,
+++};
+++
+++static int rtl8197f_ictl_map(struct irq_domain *domain, unsigned int virq,
+++				     irq_hw_number_t hwirq)
+++{
+++	struct rtl8197f_ictl *ictl = domain->host_data;
+++
+++	irq_set_chip_data(virq, ictl);
+++	irq_set_chip_and_handler(virq, &rtl8197f_ictl_chip, handle_level_irq);
+++	irq_set_probe(virq);
+++
+++	return 0;
+++}
+++
+++static const struct irq_domain_ops rtl8197f_ictl_domain_ops = {
+++	.xlate = irq_domain_xlate_onecell,
+++	.map = rtl8197f_ictl_map,
+++};
+++
+++static void rtl8197f_ictl_handle_bank(struct rtl8197f_ictl *ictl,
+++				      u32 status_reg, u32 mask_reg, unsigned int base)
+++{
+++	u32 pending = readl(ictl->base + status_reg) & readl(ictl->base + mask_reg);
+++	unsigned int bit;
+++
+++	for (bit = 0; bit < 32; bit++) {
+++		if (pending & BIT(bit))
+++			generic_handle_domain_irq(ictl->domain, base + bit);
+++	}
+++}
+++
+++static void rtl8197f_ictl_chained_handle(struct irq_desc *desc)
+++{
+++	struct rtl8197f_ictl *ictl = irq_desc_get_handler_data(desc);
+++	struct irq_chip *chip = irq_desc_get_chip(desc);
+++
+++	chained_irq_enter(chip, desc);
+++	rtl8197f_ictl_handle_bank(ictl, RTL8197F_GISR, RTL8197F_GIMR, 0);
+++	rtl8197f_ictl_handle_bank(ictl, RTL8197F_GISR2, RTL8197F_GIMR2, 32);
+++	chained_irq_exit(chip, desc);
+++}
+++
+++static void rtl8197f_ictl_init_routing(struct rtl8197f_ictl *ictl)
+++{
+++	/*
+++	 * TODO: Move IRR0..7 route constants into DT or confirm the common
+++	 * RTL8197F reset values before enabling board-specific routing here.
+++	 */
+++	writel(0, ictl->base + RTL8197F_GIMR);
+++	writel(0, ictl->base + RTL8197F_GIMR2);
+++}
+++
+++static int __init rtl8197f_ictl_of_init(struct device_node *node,
+++					struct device_node *parent)
+++{
+++	struct rtl8197f_ictl *ictl;
+++	int parent_irq;
+++
+++	ictl = kzalloc(sizeof(*ictl), GFP_KERNEL);
+++	if (!ictl)
+++		return -ENOMEM;
+++
+++	ictl->base = of_iomap(node, 0);
+++	if (!ictl->base) {
+++		kfree(ictl);
+++		return -ENXIO;
+++	}
+++
+++	raw_spin_lock_init(&ictl->lock);
+++	rtl8197f_ictl_init_routing(ictl);
+++
+++	ictl->domain = irq_domain_add_linear(node, RTL8197F_ICTL_LINES,
+++						 &rtl8197f_ictl_domain_ops, ictl);
+++	if (!ictl->domain) {
+++		iounmap(ictl->base);
+++		kfree(ictl);
+++		return -ENOMEM;
+++	}
+++
+++	parent_irq = irq_of_parse_and_map(node, 0);
+++	if (!parent_irq) {
+++		pr_warn("rtl8197f-ictl: no cascade parent, irqchip registered without chained handler\n");
+++		return 0;
+++	}
+++
+++	irq_set_chained_handler_and_data(parent_irq,
+++					     rtl8197f_ictl_chained_handle, ictl);
+++
+++	return 0;
+++}
+++
+++IRQCHIP_DECLARE(rtl8197f_ictl, "realtek,rtl8197f-ictl",
+++		rtl8197f_ictl_of_init);
+diff --git a/target/linux/rtl819x/patches-6.18/030-spi-add-realtek-sheipa-spi-mem-scaffold.patch b/target/linux/rtl819x/patches-6.18/030-spi-add-realtek-sheipa-spi-mem-scaffold.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..1b3b79af0f6c43db99084990e133ba3e7315af03
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/030-spi-add-realtek-sheipa-spi-mem-scaffold.patch
+@@ -0,0 +1,312 @@
++From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
++From: OpenWrt RTL8197F scaffold <noreply@example.invalid>
++Date: Tue, 7 Jul 2026 00:00:00 +0900
++Subject: [PATCH] spi: add Realtek Sheipa SPI memory scaffold
++
++Add a polling-first spi-mem scaffold for the Realtek Sheipa SPI controller used
++as the RTL8197F boot flash controller. JEDEC/read/erase/program sequences are
++left as TODOs until the controller contract is forward-ported from the GPLv2
++8devices reference driver.
++
++---
++ drivers/spi/Kconfig                  |  10 +++
++ drivers/spi/Makefile                 |   1 +
++ drivers/spi/spi-realtek-sheipa.c     | 145 +++++++++++++++++++++++++++++++++++
++ 3 files changed, 156 insertions(+)
++ create mode 100644 drivers/spi/spi-realtek-sheipa.c
++
++--- a/drivers/spi/Kconfig
+++++ b/drivers/spi/Kconfig
++@@ -1254,6 +1254,17 @@ config SPI_REALTEK_SNAND
++ 	help
++ 	  This selects the Realtek SPI NAND Flash controller driver.
++
+++config SPI_REALTEK_SHEIPA
+++	tristate "Realtek Sheipa SPI flash controller scaffold"
+++	depends on MACH_REALTEK_RTL819X || COMPILE_TEST
+++	depends on SPI_MEM
+++	help
+++	  Enable a provisional spi-mem driver for the Realtek Sheipa SPI
+++	  controller used by RTL8197F-class SoCs for boot SPI NOR. The initial
+++	  implementation is polling-only and supports the read-only operations
+++	  needed for early SPI NOR probing. Erase and page program sequences
+++	  remain TODOs.
+++
++ config SPI_S3C64XX
++ 	tristate "Samsung S3C64XX series type SPI"
++ 	depends on PLAT_SAMSUNG || ARCH_S5PV210 || ARCH_EXYNOS || COMPILE_TEST
++--- a/drivers/spi/Makefile
+++++ b/drivers/spi/Makefile
++@@ -128,4 +128,5 @@ obj-$(CONFIG_SPI_RB4XX)			+= spi-rb4xx.o
++ obj-$(CONFIG_SPI_REALTEK_SNAND)		+= spi-realtek-rtl-snand.o
+++obj-$(CONFIG_SPI_REALTEK_SHEIPA)	+= spi-realtek-sheipa.o
++ obj-$(CONFIG_SPI_RPCIF)			+= spi-rpc-if.o
++ obj-$(CONFIG_SPI_RSPI)			+= spi-rspi.o
++ obj-$(CONFIG_SPI_RZV2H_RSPI)		+= spi-rzv2h-rspi.o
++--- /dev/null
+++++ b/drivers/spi/spi-realtek-sheipa.c
++@@ -0,0 +1,264 @@
+++// SPDX-License-Identifier: GPL-2.0-only
+++/*
+++ * Realtek RTL8197F "Sheipa" SPI flash controller (a Synopsys DesignWare SSI).
+++ *
+++ * BSP_SPIC_BASE = 0x18143000 (KSEG1 0xb8143000). The boot SPI-NOR is wired to
+++ * this controller. Read sequencing follows the RTL8197F SDK
+++ * (drivers/spi/sheipa/spi-sheipa.c), reimplemented from the register-level
+++ * hardware facts: for a read the command + address are pushed into the TX FIFO
+++ * FIRST, and only then is the controller enabled (SSIENR = 1). Enabling before
+++ * loading the FIFO -- as an earlier version did -- starts the transfer with the
+++ * wrong framing and wedges the controller.
+++ */
+++
+++#include <linux/bitops.h>
+++#include <linux/delay.h>
+++#include <linux/io.h>
+++#include <linux/minmax.h>
+++#include <linux/module.h>
+++#include <linux/of.h>
+++#include <linux/platform_device.h>
+++#include <linux/spi/spi.h>
+++#include <linux/spi/spi-mem.h>
+++
+++#define DW_CTRLR0	0x00
+++#define DW_CTRLR1	0x04
+++#define DW_SSIENR	0x08
+++#define DW_SER		0x10
+++#define DW_BAUDR	0x14
+++#define DW_TXFLR	0x20
+++#define DW_RXFLR	0x24
+++#define DW_SR		0x28
+++#define DW_DR0		0x60
+++
+++#define DW_CTRLR0_DFS_8BIT	0x7		/* data frame size = 8 bits */
+++#define DW_CTRLR0_TMOD_MASK	(3 << 8)
+++#define DW_CTRLR0_TMOD_TX	(1 << 8)	/* transmit only: cmd/addr/data out */
+++#define DW_CTRLR0_TMOD_EEPROM	(3 << 8)	/* EEPROM read: tx cmd, then rx */
+++
+++#define DW_SR_BUSY	BIT(0)
+++#define DW_SR_TFNF	BIT(1)			/* TX FIFO not full */
+++#define DW_SR_TFE	BIT(2)			/* TX FIFO empty */
+++#define DW_SR_RFNE	BIT(3)			/* RX FIFO not empty */
+++
+++#define DW_BAUDR_DIV	20			/* conservative SPI clock divider */
+++#define DW_RX_CHUNK	32			/* max frames per transaction (FIFO-bound) */
+++#define DW_POLL_US	1000000
+++
+++struct rtl_sheipa {
+++	void __iomem *base;
+++};
+++
+++static u32 dw_rd(struct rtl_sheipa *s, u32 reg)
+++{
+++	return readl(s->base + reg);
+++}
+++
+++static void dw_wr(struct rtl_sheipa *s, u32 reg, u32 val)
+++{
+++	writel(val, s->base + reg);
+++}
+++
+++static int dw_wait(struct rtl_sheipa *s, u32 mask, u32 val)
+++{
+++	unsigned int t = DW_POLL_US;
+++
+++	while (t--) {
+++		if ((dw_rd(s, DW_SR) & mask) == val)
+++			return 0;
+++		udelay(1);
+++	}
+++	return -ETIMEDOUT;
+++}
+++
+++static int rtl_sheipa_read_op(struct rtl_sheipa *s, unsigned int cs, u8 opcode,
+++			      u64 addr, unsigned int addr_nbytes,
+++			      unsigned int dummy_nbytes, void *buf,
+++			      unsigned int len)
+++{
+++	u8 *rx = buf;
+++	unsigned int i;
+++	int ret;
+++
+++	if (!len || len > DW_RX_CHUNK)
+++		return -EINVAL;
+++
+++	/* Controller must be idle and disabled to (re)configure. */
+++	ret = dw_wait(s, DW_SR_BUSY, 0);
+++	if (ret)
+++		return ret;
+++
+++	dw_wr(s, DW_SSIENR, 0);
+++
+++	/*
+++	 * EEPROM read mode + single-bit channels, preserving the DFS and SPI
+++	 * mode the bootloader configured (like the SDK's set_rx_mode).
+++	 */
+++	dw_wr(s, DW_CTRLR0, (dw_rd(s, DW_CTRLR0) | DW_CTRLR0_TMOD_EEPROM) & 0xfff0ffff);
+++	/*
+++	 * This DesignWare variant loads CTRLR1 as the exact number of receive
+++	 * frames (not the classic NDF = frames - 1): programming len - 1 yields
+++	 * only len - 1 bytes and the final read blocks forever.
+++	 */
+++	dw_wr(s, DW_CTRLR1, len);
+++	dw_wr(s, DW_BAUDR, DW_BAUDR_DIV);
+++	dw_wr(s, DW_SER, BIT(cs));
+++
+++	/*
+++	 * Load command/address/dummy into the TX FIFO. Each access to the data
+++	 * register queues frames according to its WIDTH on this DesignWare
+++	 * variant, so a byte write queues exactly one 8-bit frame -- a 32-bit
+++	 * write would queue four and corrupt the framing.
+++	 */
+++	writeb(opcode, s->base + DW_DR0);
+++	for (i = 0; i < addr_nbytes; i++)
+++		writeb(addr >> (8 * (addr_nbytes - 1 - i)), s->base + DW_DR0);
+++	for (i = 0; i < dummy_nbytes; i++)
+++		writeb(0, s->base + DW_DR0);
+++
+++	/* Now start the transfer. */
+++	dw_wr(s, DW_SSIENR, 1);
+++
+++	/* Drain the RX FIFO as the data frames arrive. */
+++	for (i = 0; i < len; i++) {
+++		ret = dw_wait(s, DW_SR_RFNE, DW_SR_RFNE);
+++		if (ret)
+++			goto out;
+++		rx[i] = readb(s->base + DW_DR0);
+++	}
+++
+++out:
+++	dw_wr(s, DW_SSIENR, 0);
+++	return ret;
+++}
+++
+++/*
+++ * Transmit-only transaction: command, optional address and optional data all go
+++ * out on MOSI (write-enable, page program, sector/block erase). No RX. The
+++ * whole frame must fit in the TX FIFO so the controller does not underrun and
+++ * drop chip-select mid-command; adjust_op_size caps the data accordingly.
+++ */
+++static int rtl_sheipa_write_op(struct rtl_sheipa *s, unsigned int cs, u8 opcode,
+++			       u64 addr, unsigned int addr_nbytes,
+++			       const void *buf, unsigned int len)
+++{
+++	const u8 *tx = buf;
+++	unsigned int i;
+++	int ret;
+++
+++	ret = dw_wait(s, DW_SR_BUSY, 0);
+++	if (ret)
+++		return ret;
+++
+++	dw_wr(s, DW_SSIENR, 0);
+++	/*
+++	 * TX uses TMOD = 00 (transmit & receive), like the SDK's set_tx_mode
+++	 * which just clears the TMOD bits. TMOD = 01 (transmit-only) does not
+++	 * actually shift the data out on this DesignWare variant, so the flash
+++	 * is never programmed and jffs2 spins forever. The RX frames clocked in
+++	 * alongside the transmit are ignored (they fit the FIFO since data is
+++	 * capped to 32 bytes by adjust_op_size).
+++	 */
+++	dw_wr(s, DW_CTRLR0,
+++	      dw_rd(s, DW_CTRLR0) & 0xfff0ffff & ~DW_CTRLR0_TMOD_MASK);
+++	dw_wr(s, DW_BAUDR, DW_BAUDR_DIV);
+++	dw_wr(s, DW_SER, BIT(cs));
+++
+++	writeb(opcode, s->base + DW_DR0);
+++	for (i = 0; i < addr_nbytes; i++)
+++		writeb(addr >> (8 * (addr_nbytes - 1 - i)), s->base + DW_DR0);
+++	for (i = 0; i < len; i++)
+++		writeb(tx[i], s->base + DW_DR0);
+++
+++	dw_wr(s, DW_SSIENR, 1);
+++
+++	/* Wait until every queued frame has been shifted out. */
+++	ret = dw_wait(s, DW_SR_TFE, DW_SR_TFE);
+++	if (!ret)
+++		ret = dw_wait(s, DW_SR_BUSY, 0);
+++
+++	dw_wr(s, DW_SSIENR, 0);
+++	return ret;
+++}
+++
+++static int rtl_sheipa_adjust_op_size(struct spi_mem *mem, struct spi_mem_op *op)
+++{
+++	if (op->data.nbytes > DW_RX_CHUNK)
+++		op->data.nbytes = DW_RX_CHUNK;
+++	return 0;
+++}
+++
+++static int rtl_sheipa_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
+++{
+++	struct rtl_sheipa *s = spi_controller_get_devdata(mem->spi->controller);
+++	unsigned int cs = spi_get_chipselect(mem->spi, 0);
+++
+++	if (op->cmd.buswidth != 1 || op->addr.buswidth > 1 ||
+++	    op->dummy.buswidth > 1 || op->data.buswidth > 1)
+++		return -EOPNOTSUPP;
+++
+++	if (op->data.dir == SPI_MEM_DATA_IN)
+++		return rtl_sheipa_read_op(s, cs, op->cmd.opcode, op->addr.val,
+++					  op->addr.nbytes, op->dummy.nbytes,
+++					  op->data.buf.in, op->data.nbytes);
+++
+++	/* Data-out (page program) and no-data (write-enable, erase). */
+++	if (op->dummy.nbytes)
+++		return -EOPNOTSUPP;
+++	return rtl_sheipa_write_op(s, cs, op->cmd.opcode, op->addr.val,
+++				   op->addr.nbytes,
+++				   op->data.dir == SPI_MEM_DATA_OUT ? op->data.buf.out : NULL,
+++				   op->data.dir == SPI_MEM_DATA_OUT ? op->data.nbytes : 0);
+++}
+++
+++static const struct spi_controller_mem_ops rtl_sheipa_mem_ops = {
+++	.adjust_op_size = rtl_sheipa_adjust_op_size,
+++	.exec_op = rtl_sheipa_exec_op,
+++};
+++
+++static int rtl_sheipa_probe(struct platform_device *pdev)
+++{
+++	struct spi_controller *ctlr;
+++	struct rtl_sheipa *s;
+++
+++	ctlr = devm_spi_alloc_host(&pdev->dev, sizeof(*s));
+++	if (!ctlr)
+++		return -ENOMEM;
+++
+++	platform_set_drvdata(pdev, ctlr);
+++	s = spi_controller_get_devdata(ctlr);
+++
+++	s->base = devm_platform_ioremap_resource(pdev, 0);
+++	if (IS_ERR(s->base))
+++		return PTR_ERR(s->base);
+++
+++	dw_wr(s, DW_SSIENR, 0);
+++
+++	ctlr->dev.of_node = pdev->dev.of_node;
+++	ctlr->bus_num = -1;
+++	ctlr->num_chipselect = 1;
+++	ctlr->mode_bits = SPI_CPOL | SPI_CPHA;
+++	ctlr->mem_ops = &rtl_sheipa_mem_ops;
+++
+++	dev_info(&pdev->dev, "Realtek RTL8197F sheipa SPI flash controller\n");
+++
+++	return devm_spi_register_controller(&pdev->dev, ctlr);
+++}
+++
+++static const struct of_device_id rtl_sheipa_of_match[] = {
+++	{ .compatible = "realtek,rtl8197f-sheipa-spi" },
+++	{ }
+++};
+++MODULE_DEVICE_TABLE(of, rtl_sheipa_of_match);
+++
+++static struct platform_driver rtl_sheipa_driver = {
+++	.probe = rtl_sheipa_probe,
+++	.driver = {
+++		.name = "spi-realtek-sheipa",
+++		.of_match_table = rtl_sheipa_of_match,
+++	},
+++};
+++module_platform_driver(rtl_sheipa_driver);
+++
+++MODULE_DESCRIPTION("Realtek RTL8197F sheipa SPI flash controller");
+++MODULE_LICENSE("GPL");
+diff --git a/target/linux/rtl819x/patches-6.18/040-serial-8250-of-realtek-rtl8197f-data-reg.patch b/target/linux/rtl819x/patches-6.18/040-serial-8250-of-realtek-rtl8197f-data-reg.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..1d8897d11f6f8ad1179156c7a896b94af6dbb9af
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/040-serial-8250-of-realtek-rtl8197f-data-reg.patch
+@@ -0,0 +1,62 @@
++--- a/drivers/tty/serial/8250/8250_of.c
+++++ b/drivers/tty/serial/8250/8250_of.c
++@@ -61,6 +61,35 @@
++ 	return 0;
++ }
++
+++/*
+++ * Realtek RTL8197F: the RX/TX data register sits at offset 0x24 (register 9)
+++ * instead of the standard 0x00. Everything else, including the DLL/DLM divisor
+++ * latch at 0x00/0x04, LCR and LSR, is at the usual reg-shift-2 offset. Register
+++ * 0 is therefore shared between DLL (DLAB set) and nothing at all (DLAB clear),
+++ * so a stock 8250 writes characters straight into the divisor latch and garbles
+++ * the console. Route offset 0 by the live DLAB bit: data goes to register 9,
+++ * divisor programming still lands on the standard latch.
+++ */
+++#define RTL8197F_UART_DATA_REG 9
+++
+++static unsigned int rtl8197f_serial_in(struct uart_port *p, unsigned int offset)
+++{
+++	if (offset == UART_RX &&
+++	    !(readl(p->membase + (UART_LCR << p->regshift)) & UART_LCR_DLAB))
+++		offset = RTL8197F_UART_DATA_REG;
+++
+++	return readl(p->membase + (offset << p->regshift));
+++}
+++
+++static void rtl8197f_serial_out(struct uart_port *p, unsigned int offset, u32 value)
+++{
+++	if (offset == UART_TX &&
+++	    !(readl(p->membase + (UART_LCR << p->regshift)) & UART_LCR_DLAB))
+++		offset = RTL8197F_UART_DATA_REG;
+++
+++	writel(value, p->membase + (offset << p->regshift));
+++}
+++
++ static inline struct of_serial_info *clk_nb_to_info(struct notifier_block *nb)
++ {
++ 	return container_of(nb, struct of_serial_info, clk_notifier);
++@@ -150,6 +179,15 @@
++ 	if (of_device_is_compatible(np, "mrvl,mmp-uart"))
++ 		port->regshift = 2;
++
+++	/*
+++	 * These are applied after serial8250_set_defaults() in
+++	 * serial8250_register_8250_port(), so they survive set_io_from_upio().
+++	 */
+++	if (of_device_is_compatible(np, "realtek,rtl8197f-uart")) {
+++		port->serial_in = rtl8197f_serial_in;
+++		port->serial_out = rtl8197f_serial_out;
+++	}
+++
++ 	info->rst = devm_reset_control_get_optional_shared(&ofdev->dev, NULL);
++ 	if (IS_ERR(info->rst)) {
++ 		ret = PTR_ERR(info->rst);
++@@ -353,6 +391,7 @@
++ 	{ .compatible = "ti,da830-uart", .data = (void *)PORT_DA830, },
++ 	{ .compatible = "nuvoton,wpcm450-uart", .data = (void *)PORT_NPCM, },
++ 	{ .compatible = "nuvoton,npcm750-uart", .data = (void *)PORT_NPCM, },
+++	{ .compatible = "realtek,rtl8197f-uart", .data = (void *)PORT_16550A, },
++ 	{ /* end of list */ },
++ };
++ MODULE_DEVICE_TABLE(of, of_platform_serial_table);
+diff --git a/target/linux/rtl819x/patches-6.18/041-serial-8250-early-realtek-rtl8197f-earlycon.patch b/target/linux/rtl819x/patches-6.18/041-serial-8250-early-realtek-rtl8197f-earlycon.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..d0c26bc40fa6c26562a954629e92128dc2cd7704
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/041-serial-8250-early-realtek-rtl8197f-earlycon.patch
+@@ -0,0 +1,50 @@
++--- a/drivers/tty/serial/8250/8250_early.c
+++++ b/drivers/tty/serial/8250/8250_early.c
++@@ -170,6 +170,47 @@
++ 	device->con->read = early_serial8250_read;
++ 	return 0;
++ }
+++/*
+++ * Realtek RTL8197F: the RX/TX data register is at 0x24 (register 9), not the
+++ * standard 0x00. init_port() only touches control/latch registers, which are
+++ * standard, so it works unchanged; only the character output has to target the
+++ * relocated data register. DLAB is always clear while transmitting, so no
+++ * disambiguation is needed here.
+++ */
+++static void __init rtl8197f_early_putc(struct uart_port *port, unsigned char c)
+++{
+++	unsigned int status;
+++
+++	writel(c, port->membase + (9 << port->regshift));
+++	for (;;) {
+++		status = serial8250_early_in(port, UART_LSR);
+++		if (uart_lsr_tx_empty(status))
+++			break;
+++		cpu_relax();
+++	}
+++}
+++
+++static void __init rtl8197f_early_write(struct console *console,
+++				       const char *s, unsigned int count)
+++{
+++	struct earlycon_device *device = console->data;
+++
+++	uart_console_write(&device->port, s, count, rtl8197f_early_putc);
+++}
+++
+++static int __init rtl8197f_early_setup(struct earlycon_device *device,
+++				       const char *options)
+++{
+++	int ret = early_serial8250_setup(device, options);
+++
+++	if (ret)
+++		return ret;
+++
+++	device->con->write = rtl8197f_early_write;
+++	return 0;
+++}
+++OF_EARLYCON_DECLARE(rtl8197f, "realtek,rtl8197f-uart", rtl8197f_early_setup);
+++
++ EARLYCON_DECLARE(uart8250, early_serial8250_setup);
++ EARLYCON_DECLARE(uart, early_serial8250_setup);
++ OF_EARLYCON_DECLARE(ns16550, "ns16550", early_serial8250_setup);
+diff --git a/target/linux/rtl819x/patches-6.18/050-net-add-rtl8197f-ethernet.patch b/target/linux/rtl819x/patches-6.18/050-net-add-rtl8197f-ethernet.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..a1a83ce04f800bab57faf74c653b0d380f6f19a2
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/050-net-add-rtl8197f-ethernet.patch
+@@ -0,0 +1,20 @@
++--- a/drivers/net/ethernet/realtek/Kconfig
+++++ b/drivers/net/ethernet/realtek/Kconfig
++@@ -143 +143,10 @@
++ endif # NET_VENDOR_REALTEK
+++
+++config RTL8197F_ETH
+++	tristate "Realtek RTL8197F CPU NIC (swNic) support"
+++	depends on MACH_REALTEK_RTL819X || COMPILE_TEST
+++	select PHYLIB
+++	help
+++	  Polled driver for the on-SoC CPU network engine of the Realtek
+++	  RTL8197F home-router SoC and its internal switch CPU port.
+++
++--- a/drivers/net/ethernet/Makefile
+++++ b/drivers/net/ethernet/Makefile
++@@ -108,3 +108,4 @@ obj-$(CONFIG_NET_VENDOR_XIRCOM) += xircom
++ obj-$(CONFIG_NET_VENDOR_SYNOPSYS) += synopsys/
++ obj-$(CONFIG_NET_VENDOR_PENSANDO) += pensando/
++ obj-$(CONFIG_OA_TC6) += oa_tc6.o
+++obj-$(CONFIG_RTL8197F_ETH) += realtek/rtl8197f_eth.o
+diff --git a/target/linux/rtl819x/patches-6.18/060-net-dsa-rtl8-4-pad-short-frames.patch b/target/linux/rtl819x/patches-6.18/060-net-dsa-rtl8-4-pad-short-frames.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..65dbbdfbc71d31ec669ba0526621d2b23858cd46
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/060-net-dsa-rtl8-4-pad-short-frames.patch
+@@ -0,0 +1,16 @@
++--- a/net/dsa/tag_rtl8_4.c
+++++ b/net/dsa/tag_rtl8_4.c
++@@ -129,6 +129,13 @@ static void rtl8_4_write_tag(struct sk_bu
++ static struct sk_buff *rtl8_4_tag_xmit(struct sk_buff *skb,
++ 				       struct net_device *dev)
++ {
+++	/* The switch removes the 8-byte tag before transmitting the frame.
+++	 * Pad the untagged frame first so it remains at least ETH_ZLEN bytes
+++	 * after the tag is removed.
+++	 */
+++	if (unlikely(__skb_put_padto(skb, ETH_ZLEN, false)))
+++		return NULL;
+++
++ 	skb_push(skb, RTL8_4_TAG_LEN);
++
++ 	dsa_alloc_etype_header(skb, RTL8_4_TAG_LEN);
+diff --git a/target/linux/rtl819x/patches-6.18/061-net-dsa-realtek-rtl8197f-hw-cputag.patch b/target/linux/rtl819x/patches-6.18/061-net-dsa-realtek-rtl8197f-hw-cputag.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..913cb445bc849ccd8bed094bba9f649349622a8f
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/061-net-dsa-realtek-rtl8197f-hw-cputag.patch
+@@ -0,0 +1,28 @@
++From: OpenWrt RTL819x porting
++Subject: [PATCH] net: dsa: realtek: use RTL8197F hardware CPU-tag format
++
++The RTL8197F MAC connected to the RTL8367RB-VB has hardware which translates
++the switch's native 4-byte CPU tag to and from swNic descriptor port metadata.
++Keep reporting RTL8_4 to DSA as the in-kernel port-selection format, but put
++the external switch into the vendor SDK's 4-byte wire format.
++
++--- a/drivers/net/dsa/realtek/rtl8365mb_main.c
+++++ b/drivers/net/dsa/realtek/rtl8365mb_main.c
++@@ -2341,7 +2341,7 @@ static int rtl8365mb_change_tag_protocol(
++
++ 	switch (proto) {
++ 	case DSA_TAG_PROTO_RTL8_4:
++-		cpu->format = RTL8365MB_CPU_FORMAT_8BYTES;
+++		cpu->format = RTL8365MB_CPU_FORMAT_4BYTES;
++ 		cpu->position = RTL8365MB_CPU_POS_AFTER_SA;
++ 		break;
++ 	case DSA_TAG_PROTO_RTL8_4T:
++@@ -2652,7 +2652,7 @@ static int rtl8365mb_detect(struct realte
++ 	mb->cpu.insert = RTL8365MB_CPU_INSERT_TO_ALL;
++ 	mb->cpu.position = RTL8365MB_CPU_POS_AFTER_SA;
++ 	mb->cpu.rx_length = RTL8365MB_CPU_RXLEN_64BYTES;
++-	mb->cpu.format = RTL8365MB_CPU_FORMAT_8BYTES;
+++	mb->cpu.format = RTL8365MB_CPU_FORMAT_4BYTES;
++
++ 	return 0;
++ }
+diff --git a/target/linux/rtl819x/patches-6.18/070-pci-add-rtl8197f-pcie.patch b/target/linux/rtl819x/patches-6.18/070-pci-add-rtl8197f-pcie.patch
+new file mode 100644
+index 0000000000000000000000000000000000000000..77cff9783cbf6f1940519a26b9b48cbf13e8cdf7
+--- /dev/null
++++ b/target/linux/rtl819x/patches-6.18/070-pci-add-rtl8197f-pcie.patch
+@@ -0,0 +1,27 @@
++--- a/drivers/pci/controller/Kconfig
+++++ b/drivers/pci/controller/Kconfig
++@@ -13,6 +13,14 @@ config PCIE_APPLE_MSI_DOORBELL_ADDR
++ 	default 0xfffff000
++ 	depends on PCIE_APPLE
++
+++config PCIE_RTL8197F
+++	bool "Realtek RTL8197F PCIe controller"
+++	depends on MACH_REALTEK_RTL819X
+++	default MACH_REALTEK_RTL819X
+++	help
+++	  Root complex driver for the single-lane PCIe port on Realtek
+++	  RTL8197F-class router SoCs, used for the companion Wi-Fi chip.
+++
++ config PCIE_ALTERA
++ 	bool "Altera PCIe controller"
++ 	depends on ARM || NIOS2 || ARM64 || RISCV || COMPILE_TEST
++--- a/drivers/pci/controller/Makefile
+++++ b/drivers/pci/controller/Makefile
++@@ -1,6 +1,7 @@
++ # SPDX-License-Identifier: GPL-2.0
++ obj-$(CONFIG_PCIE_CADENCE) += cadence/
++ obj-$(CONFIG_PCI_FTPCI100) += pci-ftpci100.o
+++obj-$(CONFIG_PCIE_RTL8197F) += pcie-rtl8197f.o
++ obj-$(CONFIG_PCI_IXP4XX) += pci-ixp4xx.o
++ obj-$(CONFIG_PCI_HYPERV) += pci-hyperv.o
++ obj-$(CONFIG_PCI_HYPERV_INTERFACE) += pci-hyperv-intf.o
+diff --git a/target/linux/rtl819x/rtl8197f/config-6.18 b/target/linux/rtl819x/rtl8197f/config-6.18
+new file mode 100644
+index 0000000000000000000000000000000000000000..430469c95d349e6d0cd83df6f4ac8ff0035dd0e5
+--- /dev/null
++++ b/target/linux/rtl819x/rtl8197f/config-6.18
+@@ -0,0 +1,85 @@
++# SPDX-License-Identifier: GPL-2.0-only
++# Provisional RTL8197F-class Stage 0 kernel scaffold.
++
++CONFIG_MACH_REALTEK_RTL819X=y
++CONFIG_CPU_MIPS32_R2=y
++# CONFIG_CPU_MIPS32_R1 is not set
++# 24Kc has no hardware FPU; the kernel still needs FP support to accept the
++# FP-ABI userspace binaries (else /sbin/init fails to exec with -ENOEXEC) and
++# to emulate any floating point.
++CONFIG_MIPS_FP_SUPPORT=y
++CONFIG_COMPAT_32BIT_TIME=y
++CONFIG_PAGE_BLOCK_MAX_ORDER=10
++
++CONFIG_COMMON_CLK=y
++CONFIG_CEVT_R4K=y
++CONFIG_CSRC_R4K=y
++CONFIG_IRQ_DOMAIN=y
++CONFIG_IRQ_MIPS_CPU=y
++CONFIG_IRQ_REALTEK_RTL8197F=y
++
++CONFIG_OF=y
++CONFIG_OF_ADDRESS=y
++CONFIG_OF_EARLY_FLATTREE=y
++CONFIG_OF_FLATTREE=y
++CONFIG_OF_IRQ=y
++CONFIG_USE_OF=y
++
++CONFIG_SERIAL_8250=y
++CONFIG_SERIAL_8250_CONSOLE=y
++CONFIG_SERIAL_OF_PLATFORM=y
++
++# devtmpfs auto-populates /dev (incl. /dev/ttyS0) so procd's askconsole can
++# find the console tty and spawn the login shell. Without it /dev has no
++# ttyS0 node, askconsole skips it, and no console prompt ever appears.
++CONFIG_DEVTMPFS=y
++CONFIG_DEVTMPFS_MOUNT=y
++CONFIG_SERIAL_8250_NR_UARTS=3
++CONFIG_SERIAL_8250_RUNTIME_UARTS=1
++CONFIG_EARLY_PRINTK=y
++CONFIG_SYS_HAS_EARLY_PRINTK=y
++# CONFIG_EARLY_PRINTK_8250 is not set
++# CONFIG_USE_GENERIC_EARLY_PRINTK_8250 is not set
++
++CONFIG_MIPS_RAW_APPENDED_DTB=y
++# CONFIG_MIPS_NO_APPENDED_DTB is not set
++CONFIG_MIPS_CMDLINE_FROM_DTB=y
++# CONFIG_MIPS_CMDLINE_FROM_BOOTLOADER is not set
++
++CONFIG_MTD=y
++CONFIG_MTD_SPI_NOR=y
++CONFIG_NVMEM=y
++CONFIG_NVMEM_LAYOUTS=y
++CONFIG_SPI=y
++CONFIG_SPI_MASTER=y
++CONFIG_SPI_MEM=y
++CONFIG_SPI_REALTEK_SHEIPA=y
++
++# RTL8197F on-SoC CPU NIC (internal switch CPU port), polled bring-up driver.
++CONFIG_NET_VENDOR_REALTEK=y
++CONFIG_RTL8197F_ETH=y
++
++# Stage 1 and later only.
++# CONFIG_NET_RTL838X is not set
++# CONFIG_PCS_RTL_OTTO is not set
++
++# Wired LAN: external RTL8367RB-VB switch on GPIO-SMI, driven by the mainline
++# realtek DSA driver (rtl8365mb). eth0 (rtl8197f-eth) is the DSA conduit.
++CONFIG_GPIO_GENERIC=y
++CONFIG_GPIO_GENERIC_PLATFORM=y
++CONFIG_NET_DSA=y
++CONFIG_NET_DSA_REALTEK=y
++CONFIG_NET_DSA_REALTEK_SMI=y
++CONFIG_NET_DSA_REALTEK_RTL8365MB=y
++CONFIG_NET_DSA_TAG_RTL8_4=y
++CONFIG_REALTEK_PHY=y
++CONFIG_FIXED_PHY=y
++CONFIG_PHYLINK=y
++CONFIG_REGMAP=y
++# CONFIG_NET_DSA_REALTEK_MDIO is not set
++CONFIG_PCI=y
++CONFIG_PCI_DRIVERS_GENERIC=y
++CONFIG_PCIE_RTL8197F=y
++CONFIG_GENERIC_PCI_IOMAP=y
++CONFIG_PCI_DOMAINS=y
++# CONFIG_KALLSYMS_UNCOMPRESSED is not set
+diff --git a/target/linux/rtl819x/rtl8197f/target.mk b/target/linux/rtl819x/rtl8197f/target.mk
+new file mode 100644
+index 0000000000000000000000000000000000000000..11423ff039c434271d92aa6ca734276dd2382d8a
+--- /dev/null
++++ b/target/linux/rtl819x/rtl8197f/target.mk
+@@ -0,0 +1,14 @@
++# SPDX-License-Identifier: GPL-2.0-only
++
++ARCH:=mipsel
++SUBTARGET:=rtl8197f
++CPU_TYPE:=24kc
++BOARDNAME:=Realtek RTL8197F-class SoCs
++
++FEATURES := $(filter-out mips16,$(FEATURES))
++
++CPU_CFLAGS_mips32r2 := -mips32r2 -mtune=24kc
++
++define Target/Description
++	Build firmware for Realtek RTL8197F-class router SoCs.
++endef
