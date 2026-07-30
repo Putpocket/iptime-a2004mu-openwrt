@@ -1,13 +1,24 @@
 # ipTIME A2004MU support for OpenWrt
 
-This is an unofficial port of OpenWrt to the ipTIME A2004MU (Realtek
-RTL8197F). It is not affiliated with or endorsed by OpenWrt, ipTIME, or
-Realtek.
+This project brings the ipTIME A2004MU to Linux 6.18/OpenWrt by implementing
+the missing Realtek RTL8197F platform and hardware support in the pinned
+OpenWrt base. It does not import or redistribute proprietary Realtek SDK
+source. This is an unofficial port and is not affiliated with or endorsed by
+OpenWrt, ipTIME, or Realtek.
 
 The repository contains one source patch, the exact OpenWrt base revision and
 build configuration, research notes, and independently written analysis tools.
 It intentionally does not contain firmware images, stock firmware, extracted
 filesystems, Realtek SDK source, or device calibration data.
+
+## What this port implements
+
+- RTL819x MIPS platform and RTL8197F interrupt-controller support;
+- RTL8197F SPI flash, UART/earlycon, Ethernet, and PCIe host support;
+- RTL8197F hardware CPU-tag interoperability with the RTL8367RB DSA switch;
+- NVMEM-based RTL8822BE Wi-Fi calibration loading;
+- A2004MU device tree, image generation, sysupgrade, and first-boot network
+  recovery.
 
 ## Download
 
@@ -141,6 +152,19 @@ handoff records are ignored and must remain outside Git history.
 
 # ipTIME A2004MU OpenWrt 지원
 
+이 프로젝트는 기준 OpenWrt 리비전의 Linux 6.18에 없던 Realtek RTL8197F
+플랫폼과 하드웨어 지원을 구현해 ipTIME A2004MU를 구동합니다. 독점
+Realtek SDK 원본 소스를 가져오거나 재배포하지 않습니다. OpenWrt, ipTIME
+또는 Realtek이 보증하거나 후원하지 않는 비공식 포트입니다.
+
+## 핵심 구현
+
+- RTL819x MIPS 플랫폼과 RTL8197F 인터럽트 컨트롤러
+- RTL8197F SPI 플래시, UART/earlycon, Ethernet, PCIe 호스트
+- RTL8367RB DSA 스위치와 RTL8197F 하드웨어 CPU tag 연동
+- NVMEM 기반 RTL8822BE Wi-Fi 보정값 로딩
+- A2004MU device tree, 이미지 생성, sysupgrade, 첫 부팅 네트워크 복구
+
 ## 다운로드
 
 - **ipTIME 정품 펌웨어에서 처음 설치:**
@@ -153,10 +177,6 @@ handoff records are ignored and must remain outside Git history.
 플래시하기 전에 아래 설치 주의사항을 읽으십시오. factory 이미지는 정품
 웹 업그레이드 전용이고, sysupgrade 이미지는 이미 OpenWrt가 설치된
 공유기에서만 사용합니다.
-
-이 저장소는 Realtek RTL8197F 기반 ipTIME A2004MU를 위한 비공식 OpenWrt
-포트입니다. OpenWrt, ipTIME 또는 Realtek이 보증하거나 후원하는 프로젝트가
-아닙니다.
 
 저장소에는 OpenWrt 기준 리비전, 단일 통합 패치, 빌드 설정, 조사 문서와
 독립적으로 작성된 분석 도구가 들어 있습니다. 정품 펌웨어, 추출된

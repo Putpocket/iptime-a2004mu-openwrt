@@ -11,10 +11,14 @@
 
 ## English
 
-This is an unofficial build for the ipTIME A2004MU only. Keep UART
-recovery available. Back up the stock firmware and device-specific data before
-writing flash. This project is not affiliated with or endorsed by OpenWrt,
-ipTIME, or Realtek.
+This build uses newly implemented Linux 6.18 support for the Realtek RTL8197F
+platform, interrupt controller, SPI, UART, Ethernet, PCIe, and DSA CPU-tag
+interoperability. It does not redistribute proprietary Realtek SDK source.
+
+This is an unofficial build for the ipTIME A2004MU only. Keep UART recovery
+available. Back up the stock firmware and device-specific data before writing
+flash. This project is not affiliated with or endorsed by OpenWrt, ipTIME, or
+Realtek.
 
 ### Assets
 
@@ -70,10 +74,14 @@ Wi-Fi firmware redistribution license are all included in the repository.
 
 ## 한국어
 
-이 릴리스는 ipTIME A2004MU 전용 비공식 빌드입니다. 플래시를
-쓰기 전에 UART 복구 수단을 준비하고 정품 펌웨어 및 기기별 데이터를
-백업하십시오. 이 프로젝트는 OpenWrt, ipTIME 또는 Realtek이 보증하거나
-후원하지 않습니다.
+이 빌드는 Linux 6.18에 새로 구현한 Realtek RTL8197F 플랫폼, 인터럽트
+컨트롤러, SPI, UART, Ethernet, PCIe와 DSA CPU tag 연동을 사용합니다.
+독점 Realtek SDK 원본 소스는 재배포하지 않습니다.
+
+이 릴리스는 ipTIME A2004MU 전용 비공식 빌드입니다. 플래시를 쓰기 전에
+UART 복구 수단을 준비하고 정품 펌웨어 및 기기별 데이터를 백업하십시오.
+이 프로젝트는 OpenWrt, ipTIME 또는 Realtek이 보증하거나 후원하지
+않습니다.
 
 ### 첨부 파일
 
