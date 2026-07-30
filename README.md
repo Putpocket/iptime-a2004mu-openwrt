@@ -1,17 +1,19 @@
-# ipTIME A2004MU support for OpenWrt
+# Linux 6.18/OpenWrt support for ipTIME A2004MU (RTL8197F)
 
-This project brings the ipTIME A2004MU to Linux 6.18/OpenWrt by implementing
-the missing Realtek RTL8197F platform and hardware support in the pinned
-OpenWrt base. It does not import or redistribute proprietary Realtek SDK
-source. This is an unofficial port and is not affiliated with or endorsed by
-OpenWrt, ipTIME, or Realtek.
+**The main contribution is not merely an A2004MU device profile: this project
+implements the RTL8197F SoC platform and hardware drivers missing from the
+pinned OpenWrt tree.**
+
+It does not import or redistribute proprietary Realtek SDK source. This is an
+unofficial port and is not affiliated with or endorsed by OpenWrt, ipTIME, or
+Realtek.
 
 The repository contains one source patch, the exact OpenWrt base revision and
 build configuration, research notes, and independently written analysis tools.
 It intentionally does not contain firmware images, stock firmware, extracted
 filesystems, Realtek SDK source, or device calibration data.
 
-## What this port implements
+## New Linux 6.18 RTL8197F support
 
 - RTL819x MIPS platform and RTL8197F interrupt-controller support;
 - RTL8197F SPI flash, UART/earlycon, Ethernet, and PCIe host support;
@@ -150,14 +152,16 @@ handoff records are ignored and must remain outside Git history.
 
 ---
 
-# ipTIME A2004MU OpenWrt 지원
+# ipTIME A2004MU (RTL8197F) Linux 6.18/OpenWrt 지원
 
-이 프로젝트는 기준 OpenWrt 리비전의 Linux 6.18에 없던 Realtek RTL8197F
-플랫폼과 하드웨어 지원을 구현해 ipTIME A2004MU를 구동합니다. 독점
-Realtek SDK 원본 소스를 가져오거나 재배포하지 않습니다. OpenWrt, ipTIME
-또는 Realtek이 보증하거나 후원하지 않는 비공식 포트입니다.
+**이 프로젝트의 핵심은 단순한 A2004MU 기기 설정 추가가 아니라, 기준
+OpenWrt 트리에 없던 RTL8197F SoC의 Linux 6.18 플랫폼과 하드웨어
+드라이버를 구현한 것입니다.**
 
-## 핵심 구현
+독점 Realtek SDK 원본 소스를 가져오거나 재배포하지 않습니다. OpenWrt,
+ipTIME 또는 Realtek이 보증하거나 후원하지 않는 비공식 포트입니다.
+
+## Linux 6.18 RTL8197F 신규 지원
 
 - RTL819x MIPS 플랫폼과 RTL8197F 인터럽트 컨트롤러
 - RTL8197F SPI 플래시, UART/earlycon, Ethernet, PCIe 호스트
